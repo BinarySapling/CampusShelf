@@ -108,6 +108,29 @@ class CampusShelfPagesTests(TestCase):
         self.book.refresh_from_db()
         self.assertEqual(self.book.copies, 1)
 
+    def test_pending_member_cannot_use_legacy_checkout_pages(self):
+        self.member.approval_status = Member.PENDING
+        self.member.save(update_fields=["approval_status"])
+
+        staff_checkout = self.client.post("/borrowings/", {
+            "member_id": str(self.member.id),
+            "book_id": str(self.book.id),
+            "copy_id": self.copy.copy_id,
+        })
+        student_checkout = self.client.post("/student/issue/", {
+            "student_id": self.member.student_id,
+            "email": self.member.email,
+            "password": "StudentPass123!",
+            "book_id": str(self.book.id),
+            "copy_id": self.copy.copy_id,
+        })
+
+        self.assertEqual(staff_checkout.status_code, 302)
+        self.assertEqual(student_checkout.status_code, 302)
+        self.assertFalse(Borrowing.objects.filter(member=self.member, status=Borrowing.BORROWED).exists())
+        self.copy.refresh_from_db()
+        self.assertEqual(self.copy.status, BookCopy.AVAILABLE)
+
     def test_student_search_and_checkout_use_session_slip(self):
         search = self.client.get("/student/search/", {"q": "Django"})
         self.assertEqual(search.status_code, 200)

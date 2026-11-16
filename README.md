@@ -2,6 +2,10 @@
 
 CampusShelf is a campus library app. React and Vite provide the browser interface; Django provides simple function-based views, forms, JSON responses, models, sessions, authentication, and Admin. MongoDB remains the application database through the official Django MongoDB Backend.
 
+## Live app
+
+[Open CampusShelf on Vercel](https://campusshelf-six.vercel.app)
+
 ## Features
 
 - Librarian dashboard, catalogue, issue register, reviews, and Django Admin
