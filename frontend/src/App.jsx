@@ -194,7 +194,7 @@ function RequestsPage({ setNotice }) {
   }
 
   return <>
-    <PageTitle eyebrow="STUDENT ACCESS / REVIEW" title="Signup requests" note="Only approved students receive a Student ID and portal access." />
+    <PageTitle eyebrow="STUDENT ACCESS / REVIEW" title="Signup requests" note="Verify the campus email and registration number before approving portal access." />
     <section className="panel"><div className="panel-head"><div><span className="eyebrow">APPLICATIONS</span><h3>Waiting for a librarian</h3></div><span className="pill">{requests.filter((item) => item.status === "pending").length} pending</span></div>
       <div className="request-list">{requests.map((item) => <article className="request-row" key={item.id}><div className="request-avatar">{item.name.slice(0, 1).toUpperCase()}</div><div className="request-info"><b>{item.name}</b><span>{item.email}</span><small>Registration {item.registration_number} · {item.course} · Year {item.year}</small></div><span className={`status ${item.status}`}>{item.status}</span>{item.status === "pending" && <div className="row-actions"><button className="button primary small" onClick={() => review(item, "approve")}>Approve</button><button className="button danger small" onClick={() => review(item, "reject")}>Reject</button></div>}</article>)}{requests.length === 0 && <p className="empty">No signup requests yet.</p>}</div>
     </section>
@@ -237,7 +237,8 @@ function LoansPage({ setNotice }) {
       const copy = await api(`/copies/${encodeURIComponent(value)}/`);
       setScanInfo(`${copy.book_title} · ${copy.status}`);
     } catch (error) {
-      setScanInfo(error.message);
+      setScanInfo(null);
+      noticeText(setNotice, error.message, "error");
     }
   }
 

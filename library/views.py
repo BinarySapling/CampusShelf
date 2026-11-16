@@ -513,7 +513,7 @@ def search_issue_students(request):
     raw = request.GET.get("q", "").strip()
     if len(raw) < 2:
         return JsonResponse({"results": []})
-    members_query = Member.objects.all()
+    members_query = Member.objects.filter(approval_status=Member.APPROVED)
     if raw.upper().startswith("STU-"):
         exact = members_query.filter(student_id__iexact=raw).first()
         matches = [exact] if exact else []
@@ -539,7 +539,10 @@ def borrowings(request):
     if request.method == "POST":
         form = CheckoutForm(request.POST)
         member_id = to_object_id(form.cleaned_data["member_id"]) if form.is_valid() else None
-        member = Member.objects.filter(pk=member_id).first() if member_id else None
+        member = Member.objects.filter(
+            pk=member_id,
+            approval_status=Member.APPROVED,
+        ).first() if member_id else None
         copy_id = form.cleaned_data.get("copy_id", "").strip().upper() if form.is_valid() else ""
         copy_record = BookCopy.objects.filter(copy_id=copy_id, status=BookCopy.AVAILABLE).first() if copy_id else None
         if not form.is_valid():
@@ -651,7 +654,10 @@ def student_issue(request):
         messages.error(request, "Enter your Student ID, registered email, password, title and Copy ID.")
         return redirect("student_portal")
     values = form.cleaned_data
-    member = Member.objects.filter(student_id__iexact=values["student_id"].strip()).first()
+    member = Member.objects.filter(
+        student_id__iexact=values["student_id"].strip(),
+        approval_status=Member.APPROVED,
+    ).first()
     if not member or not member.user or member.email.casefold() != values["email"].strip().casefold():
         messages.error(request, "Student ID, registered campus email, or password did not match.")
         return redirect("student_portal")

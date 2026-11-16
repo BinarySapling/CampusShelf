@@ -332,7 +332,7 @@ def review_signup(request, request_id, action):
 @librarian_api
 @require_GET
 def members_list(request):
-    members = Member.objects.all()
+    members = Member.objects.filter(approval_status=Member.APPROVED)
     results = []
     for member in members:
         fixed_total = sum(
