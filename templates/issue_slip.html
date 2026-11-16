@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Issue slip{% endblock %}
+{% block heading %}Issue slip{% endblock %}
+{% block content %}
+{% if record %}
+<div class="slip-actions"><a class="text-link" href="{{ url_for('issue_register') }}"><svg class="icon icon-small"><use href="#i-ledger"/></svg> Back to issue register</a><button type="button" class="btn btn-primary" onclick="window.print()"><svg class="icon icon-small"><use href="#i-print"/></svg> Print issue slip</button></div>
+<article class="issue-slip-card">
+  <div class="slip-brand-row"><img class="slip-brand-emblem" src="{{ url_for('static', filename='campusshelf-emblem.png') }}" alt=""><div><b>CampusShelf</b><small>THE KNOWLEDGE CLUB · LIBRARY CIRCULATION</small></div><span class="slip-status {{ 'overdue' if record.is_overdue else record.status }}">{% if record.is_overdue %}OVERDUE · {{ record.overdue_days }} DAYS{% elif record.status=='borrowed' %}ON LOAN{% else %}RETURNED{% endif %}</span></div>
+  <div class="slip-title-row"><div><span class="eyebrow">BOOK ISSUE RECEIPT</span><h2>Issue slip</h2><p>Keep this slip or quote its ID when returning the book.</p></div><div class="slip-id-block"><small>ISSUE ID</small><strong>{{ record.issue_code }}</strong></div></div>
+  <div class="slip-rule"></div>
+  <section class="slip-book-feature"><span class="slip-book-icon"><svg class="icon"><use href="#i-book"/></svg></span><div><small>BOOK ISSUED</small><h3>{{ record.book_title }}</h3><p>{{ record.book_author|default('Author not recorded') }}</p><span>Category / {{ record.book_category|default('Library collection') }}</span>{% if record.copy_id %}<span class="slip-copy-id">COPY ID · {{ record.copy_id }}</span>{% endif %}</div></section>
+  <div class="slip-detail-grid">
+    <section><span class="eyebrow">STUDENT</span><h3>{{ record.member_name }}</h3><p>Student ID · {{ record.member_student_id|default('Not recorded') }}</p><p>{{ record.member_email|default('') }}</p><p>{{ record.member_course|default('Student') }}{% if record.member_year %} · Year {{ record.member_year }}{% endif %}</p></section>
+    <section><span class="eyebrow">SHELF LOCATION</span><h3>{{ record.book_shelf|default('Unassigned') }}</h3><p>Return the copy to the library desk.</p></section>
+  </div>
+  <div class="slip-dates"><div><small>ISSUED ON</small><b>{{ record.borrowed_at|datefmt }}</b></div><span class="slip-arrow">→</span><div><small>RETURN BY</small><b>{{ record.due_at|datefmt }}</b></div>{% if record.returned_at %}<div><small>RETURNED ON</small><b>{{ record.returned_at|datefmt }}</b></div>{% endif %}</div>
+  <div class="slip-note"><svg class="icon"><use href="#i-clock"/></svg><p><b>14 day loan period</b><span>Bring the book and this Issue ID to the desk on or before the due date.</span></p></div>
+  <div class="slip-signatures"><div><span>Student signature</span></div><div><span>Librarian signature</span></div></div>
+  <footer class="slip-footer"><span>CampusShelf · Campus library circulation</span><span>{{ record.issue_code }}</span></footer>
+</article>
+<script>window.addEventListener('load', () => { if (new URLSearchParams(window.location.search).get('print') === '1') window.print(); });</script>
+{% else %}<section class="panel empty-state">The issue slip is unavailable while the database is offline.</section>{% endif %}
+{% endblock %}

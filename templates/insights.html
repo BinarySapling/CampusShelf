@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Library insights{% endblock %}
+{% block heading %}Library insights{% endblock %}
+{% block content %}
+<div class="page-intro"><p>See how the collection, shelf stock, active loans and student community are distributed.</p><span class="collection-chip"><svg class="icon icon-small"><use href="#i-chart"/></svg> MONGODB AGGREGATIONS / 05</span></div>
+
+<div class="insight-grid pie-insight-grid">
+  <section class="panel pie-panel">
+    <div class="panel-heading"><div><span class="eyebrow">$GROUP · TITLE COUNT</span><h3>Collection by category</h3></div><span class="stat-icon lilac"><svg class="icon"><use href="#i-book-stack"/></svg></span></div>
+    <div class="pie-breakdown">
+      <div class="donut-chart" style="--pie-stops:{{ category_pie }}" role="img" aria-label="{{ total_titles }} book titles distributed across categories"><div class="donut-center"><b>{{ total_titles }}</b><small>titles</small></div></div>
+      <ul class="pie-legend-list">{% for c in categories %}<li><i style="--legend-color:{{ c.color }}"></i><span><b>{{ c._id }}</b><small>{{ c.total_books }} title{{ '' if c.total_books==1 else 's' }} · {{ c.total_copies }} copies</small></span></li>{% else %}<li class="pie-legend-empty">No books in the catalogue yet.</li>{% endfor %}</ul>
+    </div>
+  </section>
+
+  <section class="panel pie-panel">
+    <div class="panel-heading"><div><span class="eyebrow">$SUM · COPY AVAILABILITY</span><h3>Where are the copies?</h3></div><span class="stat-icon mint"><svg class="icon"><use href="#i-book"/></svg></span></div>
+    <div class="pie-breakdown">
+      <div class="donut-chart" style="--pie-stops:{{ copy_pie }}" role="img" aria-label="{{ available_copies }} copies on shelf and {{ on_loan_copies }} on loan"><div class="donut-center"><b>{{ total_copies }}</b><small>copies</small></div></div>
+      <ul class="pie-legend-list"><li><i style="--legend-color:#76c6a3"></i><span><b>On the shelf</b><small>{{ available_copies }} available copies</small></span></li><li><i style="--legend-color:#7464dd"></i><span><b>With students</b><small>{{ on_loan_copies }} copies on loan</small></span></li></ul>
+    </div>
+  </section>
+
+  <section class="panel pie-panel">
+    <div class="panel-heading"><div><span class="eyebrow">$MATCH · ACTIVE DUE DATES</span><h3>Loan health</h3></div><span class="stat-icon coral"><svg class="icon"><use href="#i-clock"/></svg></span></div>
+    <div class="pie-breakdown">
+      <div class="donut-chart" style="--pie-stops:{{ loan_pie }}" role="img" aria-label="{{ active_loans - overdue_loans }} active loans on time and {{ overdue_loans }} overdue"><div class="donut-center"><b>{{ active_loans }}</b><small>active loans</small></div></div>
+      <ul class="pie-legend-list"><li><i style="--legend-color:#76c6a3"></i><span><b>On time</b><small>{{ active_loans - overdue_loans }} loans</small></span></li><li><i style="--legend-color:#efa681"></i><span><b>Overdue</b><small>{{ overdue_loans }} need follow-up</small></span></li></ul>
+    </div>
+  </section>
+
+  <section class="panel pie-panel">
+    <div class="panel-heading"><div><span class="eyebrow">$GROUP · STUDENT COURSE</span><h3>Students by course</h3></div><span class="stat-icon blue"><svg class="icon"><use href="#i-users"/></svg></span></div>
+    <div class="pie-breakdown">
+      <div class="donut-chart" style="--pie-stops:{{ course_pie }}" role="img" aria-label="{{ total_students }} students distributed by course"><div class="donut-center"><b>{{ total_students }}</b><small>students</small></div></div>
+      <ul class="pie-legend-list">{% for m in members_by_course %}<li><i style="--legend-color:{{ m.color }}"></i><span><b>{{ m._id }}</b><small>{{ m.members }} student{{ '' if m.members==1 else 's' }}</small></span></li>{% else %}<li class="pie-legend-empty">Register students to see course distribution.</li>{% endfor %}</ul>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-heading"><div><span class="eyebrow">$GROUP · $SORT · $LIMIT</span><h3>Most issued titles</h3></div></div>
+    {% for p in popular %}<div class="rank-row"><span class="rank-number">{{ "%02d"|format(loop.index) }}</span><b>{{ p._id }}</b><span class="rank-count">{{ p.checkouts }} issue(s)</span></div>{% else %}<div class="empty-state">Issue slips will build the popularity report.</div>{% endfor %}
+  </section>
+
+  <section class="panel">
+    <div class="panel-heading"><div><span class="eyebrow">$AVG · $SUM</span><h3>Reader ratings</h3></div></div>
+    {% for r in ratings %}<div class="rating-row"><div><b>{{ r._id }}</b><small>{{ r.review_count }} review(s)</small></div><strong><svg class="icon icon-small"><use href="#i-star"/></svg> {{ "%.1f"|format(r.average_rating) }}</strong></div>{% else %}<div class="empty-state">Reader notes will create the first rating insight.</div>{% endfor %}
+  </section>
+</div>
+
+<div class="note-banner"><span><svg class="icon"><use href="#i-sparkles"/></svg></span><div><b>How to read these pies</b><p>Each ring is split by real MongoDB counts. Category and course pies show the share of titles or students; shelf and loan pies show where copies are; loan health counts active issues only.</p></div></div>
+{% endblock %}

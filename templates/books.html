@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Book catalogue{% endblock %}
+{% block heading %}Book catalogue{% endblock %}
+{% block content %}
+<div class="page-intro">
+  <p>Find a title, check its shelf location, and see how many copies are available or out with students.</p>
+  <div class="page-actions"><span class="collection-chip"><svg class="icon icon-small"><use href="#i-book-stack"/></svg> COLLECTION / 01</span><a class="btn btn-primary" href="{{ url_for('add_book') }}"><svg class="icon icon-small"><use href="#i-book-add"/></svg> Add title</a></div>
+</div>
+
+<section class="panel inventory-browse-panel catalogue-panel">
+    <div class="panel-heading">
+      <div><span class="eyebrow">INDEXED CATALOGUE SEARCH</span><h3>Find a title</h3></div>
+      <span class="count-badge">{{ books|length }} shown</span>
+    </div>
+    <p class="search-hint">Search title, author, ISBN, category or book description.</p>
+    <form method="get" class="filter-bar">
+      <input name="q" value="{{ q|default('') }}" placeholder="Try “Clean Code” or an ISBN…" aria-label="Search indexed book catalogue">
+      <select name="category" aria-label="Filter by category"><option value="">All categories</option>{% for c in categories|default([]) %}<option value="{{ c }}" {% if selected_category|default('')==c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select>
+      <button class="btn btn-dark" type="submit"><svg class="icon icon-small"><use href="#i-search"/></svg> Search</button>
+      {% if q or selected_category %}<a class="clear-filter" href="{{ url_for('books') }}">Clear filters</a>{% endif %}
+    </form>
+    <div class="book-grid">
+      {% for b in books %}
+      <article class="book-card">
+        <div class="book-cover cover-{{ loop.index % 5 }}">
+          <span class="cover-top">CAMPUSSHELF · {{ b.category|upper }}</span>
+          <div class="cover-symbol"><svg class="icon"><use href="{% if loop.index % 3 == 0 %}#i-sparkles{% elif loop.index % 3 == 1 %}#i-overview{% else %}#i-atom{% endif %}"/></svg></div>
+          <strong>{{ b.title }}</strong><small>{{ b.author }}</small><span class="cover-bottom">SHELF {{ b.shelf|default('UNASSIGNED')|upper }}</span>
+        </div>
+        <div class="book-card-info">
+          <span class="category-label">{{ b.category }}</span>
+          <b>{{ b.title }}</b>
+          {% if b.description %}<p class="book-description">{{ b.description }}</p>{% endif %}
+          <div class="book-stock"><div><span>ON SHELF</span><b>{{ b.copies }} <small>/ {{ b.total_copies|default(b.copies) }}</small></b></div><div><span>ON LOAN</span><b>{{ [b.total_copies|default(b.copies) - b.copies, 0]|max }}</b></div></div>
+          <div class="book-meta"><span><svg class="icon icon-tiny"><use href="#i-pin"/></svg> {{ b.shelf|default('Unassigned') }}</span>{% if b.isbn %}<span>ISBN {{ b.isbn }}</span>{% endif %}</div>
+          <a class="copy-list-link" href="{{ url_for('book_copies', book_id=b._id) }}">View copy IDs <svg class="icon icon-tiny"><use href="#i-arrow-up-right"/></svg></a>
+          <form method="post" action="{{ url_for('delete_book', book_id=b._id) }}" onsubmit="return confirm('Remove this title from inventory?')"><button class="subtle-danger" type="submit">Remove title</button></form>
+        </div>
+      </article>
+      {% else %}<div class="empty-state">No titles match this search. Try a different keyword, or add a title to inventory.</div>{% endfor %}
+    </div>
+  </section>
+{% endblock %}

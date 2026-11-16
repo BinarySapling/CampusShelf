@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Copy IDs{% endblock %}
+{% block heading %}Copy IDs{% endblock %}
+{% block content %}
+<div class="page-intro copy-page-intro"><p>Every physical copy has its own stable ID. Print these labels and place one inside each book so students can self-issue the correct copy.</p><div class="page-actions"><span class="collection-chip">INVENTORY / COPY LABELS</span><button class="btn btn-primary" type="button" onclick="window.print()"><svg class="icon icon-small"><use href="#i-print"/></svg> Print ID labels</button></div></div>
+<section class="panel copy-title-panel"><div><span class="eyebrow">{{ book.category|upper }} · SHELF {{ book.shelf|default('UNASSIGNED')|upper }}</span><h2>{{ book.title }}</h2><p>by {{ book.author }}{% if book.isbn %} · ISBN {{ book.isbn }}{% endif %}</p></div><a class="text-link no-print" href="{{ url_for('books') }}">Back to catalogue</a></section>
+<div class="copy-label-grid" id="copy-label-grid">
+{% for copy in copies %}<article class="physical-copy-label {{ 'copy-unavailable' if copy.status=='borrowed' else '' }}"><div class="copy-label-top"><img src="{{ url_for('static', filename='campusshelf-emblem.png') }}" alt=""><span>{{ 'ON LOAN' if copy.status=='borrowed' else 'ON SHELF' }}</span></div><small>INDIVIDUAL COPY ID</small><strong>{{ copy.copy_id }}</strong><div class="copy-label-meta"><span>CampusShelf collection</span><span>Section {{ copy.shelf|default('Unassigned') }}</span></div>{% if copy.borrower_name %}<span class="copy-borrower">Issued to {{ copy.borrower_name }}</span>{% endif %}</article>
+{% else %}<section class="panel empty-state">No physical copies were entered for this title. You can add copies by editing inventory stock.</section>{% endfor %}
+</div>
+{% endblock %}

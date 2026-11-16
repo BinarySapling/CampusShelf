@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Library overview{% endblock %}
+{% block heading %}Library overview{% endblock %}
+{% block content %}
+<section class="hero librarian-hero">
+  <div class="hero-copy">
+    <span class="hero-tag"><svg class="icon icon-small"><use href="#i-atom"/></svg> LIBRARY / SCIENCE / CURIOSITY</span>
+    <h2>Every book,<br><em>accounted for.</em></h2>
+    <p>Keep an eye on shelf stock, student issues and due dates. Your daily circulation snapshot is ready below.</p>
+    <a class="btn btn-light" href="{{ url_for('borrowings') }}">Open issue desk <svg class="icon icon-small"><use href="#i-arrow-up-right"/></svg></a>
+  </div>
+  <div class="hero-art">
+    <img class="hero-illustration" src="{{ url_for('static', filename='nerdy-library-hero.png') }}" alt="Books, a coding laptop, an atom model and a microscope">
+    <div class="art-stamp"><svg class="icon icon-small"><use href="#i-sparkles"/></svg> THE CURIOUS LIBRARY</div>
+    <div class="art-caption">READ / CODE / DISCOVER <span>ALL IN ONE PLACE</span></div>
+  </div>
+</section>
+
+<section class="stats-grid librarian-stats">
+  <div class="stat-card"><div class="stat-top"><span>BOOK TITLES</span><span class="stat-icon lilac"><svg class="icon"><use href="#i-book-stack"/></svg></span></div><div class="stat-number-row"><strong>{{ stats.books }}</strong><span class="mini-donut" style="--pie-stops:{{ stats.books_pie|default('#e9e6f1 0% 100%') }}" role="img" aria-label="Book titles distributed across {{ stats.categories }} categories"></span></div><p>Titles across {{ stats.categories }} categories</p></div>
+  <div class="stat-card"><div class="stat-top"><span>ON THE SHELF</span><span class="stat-icon mint"><svg class="icon"><use href="#i-book"/></svg></span></div><div class="stat-number-row"><strong>{{ stats.available_copies }}</strong><span class="mini-donut" style="--pie-stops:{{ stats.shelf_pie|default('#e9e6f1 0% 100%') }}" role="img" aria-label="{{ stats.available_pct|default(0) }} percent of copies are on the shelf"></span></div><p>{{ stats.available_pct|default(0) }}% of {{ stats.total_copies }} total copies</p></div>
+  <div class="stat-card"><div class="stat-top"><span>ON LOAN</span><span class="stat-icon peach"><svg class="icon"><use href="#i-issue"/></svg></span></div><div class="stat-number-row"><strong>{{ stats.on_loan|default(0) }}</strong><span class="mini-donut" style="--pie-stops:{{ stats.loan_pie|default('#e9e6f1 0% 100%') }}" role="img" aria-label="{{ stats.on_loan_pct|default(0) }} percent of copies are on loan"></span></div><p>{{ stats.on_loan_pct|default(0) }}% of all copies in circulation</p></div>
+  <div class="stat-card overdue-stat"><div class="stat-top"><span>OVERDUE</span><span class="stat-icon coral"><svg class="icon"><use href="#i-clock"/></svg></span></div><div class="stat-number-row"><strong>{{ stats.overdue }}</strong><span class="mini-donut" style="--pie-stops:{{ stats.overdue_pie|default('#e9e6f1 0% 100%') }}" role="img" aria-label="{{ stats.overdue }} overdue of {{ stats.active }} active loans"></span></div><p>{{ stats.overdue }} overdue of {{ stats.active }} active loans</p></div>
+  <div class="stat-card"><div class="stat-top"><span>STUDENTS</span><span class="stat-icon blue"><svg class="icon"><use href="#i-users"/></svg></span></div><div class="stat-number-row"><strong>{{ stats.members }}</strong><span class="mini-donut" style="--pie-stops:{{ stats.students_pie|default('#e9e6f1 0% 100%') }}" role="img" aria-label="Students distributed across {{ stats.courses }} courses"></span></div><p>{{ stats.courses }} courses represented</p></div>
+</section>
+
+<section class="insight-grid overview-charts">
+  <div class="panel circulation-panel">
+    <div class="panel-heading"><div><span class="eyebrow">MONTHLY CIRCULATION · LAST 6 MONTHS</span><h3>Issues & returns</h3></div><span class="panel-spark"><svg class="icon"><use href="#i-chart"/></svg></span></div>
+    <div class="chart-legend"><span><i class="legend-issue"></i>Issues</span><span><i class="legend-return"></i>Returns</span><small>MongoDB date aggregation</small></div>
+    <div class="circulation-chart" role="img" aria-label="Monthly issue and return counts">
+      {% for month in circulation %}<div class="chart-month">
+        <div class="chart-counts"><span>{{ month.issues }}</span><span>{{ month.returns }}</span></div>
+        <div class="chart-bars"><i class="issue-bar" style="height:{{ [month.issues_height, 3]|max }}%"></i><i class="return-bar" style="height:{{ [month.returns_height, 3]|max }}%"></i></div>
+        <small>{{ month.label }}</small>
+      </div>{% else %}<div class="empty-state">Circulation appears here as issues and returns are recorded.</div>{% endfor %}
+    </div>
+  </div>
+
+  <div class="panel stock-panel">
+    <div class="panel-heading"><div><span class="eyebrow">SHELF CHECK · LIVE COPIES</span><h3>Inventory by category</h3></div><a class="text-link" href="{{ url_for('books') }}">Open catalogue <svg class="icon icon-small"><use href="#i-arrow-up-right"/></svg></a></div>
+    {% if category_data %}<div class="pie-breakdown">
+      <div class="donut-chart" style="--pie-stops:{{ stats.books_pie }}" role="img" aria-label="{{ stats.books }} titles across {{ stats.categories }} book categories"><div class="donut-center"><b>{{ stats.books }}</b><small>titles</small></div></div>
+      <ul class="pie-legend-list">{% for category in category_data %}<li><i style="--legend-color:{{ category.color }}"></i><span><b>{{ category._id }}</b><small>{{ category.titles }} title{{ '' if category.titles==1 else 's' }} · {{ category.total_copies }} copies</small></span></li>{% endfor %}</ul>
+    </div>{% else %}<div class="empty-state">Add catalogue titles to see the category mix.</div>{% endif %}
+  </div>
+</section>
+
+<section class="overview-work-grid">
+  <div class="panel attention-panel">
+    <div class="panel-heading"><div><span class="eyebrow">DUE DATE FOLLOW-UP</span><h3>Overdue returns</h3></div><span class="count-badge">{{ stats.overdue }} active</span></div>
+    {% for loan in overdue_records %}<article class="overdue-row">
+      <div class="overdue-mark"><svg class="icon"><use href="#i-clock"/></svg></div><div class="overdue-detail"><b>{{ loan.book_title }}</b><span>{{ loan.member_name }}{% if loan.member_course %} · {{ loan.member_course }}{% endif %}</span><small>Due {{ loan.due_at|datefmt }} · {{ loan.overdue_days }} day{{ '' if loan.overdue_days==1 else 's' }} overdue</small><code>{{ loan.issue_code }}</code></div>
+      <form method="post" action="{{ url_for('return_book', issue_code=loan.issue_code) }}"><button class="btn btn-small btn-dark" type="submit">Check in</button></form>
+    </article>{% else %}<div class="all-clear"><span><svg class="icon"><use href="#i-check"/></svg></span><div><b>All caught up</b><small>No overdue loans need attention today.</small></div><img src="{{ url_for('static', filename='owl-librarian.png') }}" alt="A bookish owl with glasses and an atom model"></div>{% endfor %}
+    {% if stats.overdue > overdue_records|length %}<a class="text-link attention-link" href="{{ url_for('issue_register') }}">See all {{ stats.overdue }} overdue issues <svg class="icon icon-small"><use href="#i-arrow-up-right"/></svg></a>{% endif %}
+  </div>
+
+  <div class="panel popular-panel">
+    <div class="panel-heading"><div><span class="eyebrow">COLLECTION PULSE</span><h3>Most issued titles</h3></div><a class="text-link" href="{{ url_for('insights') }}">Insights <svg class="icon icon-small"><use href="#i-arrow-up-right"/></svg></a></div>
+    {% if popular %}<div class="popular-list">{% for item in popular %}<div class="popular-item"><div class="cover-mini cover-{{ loop.index % 5 }}">{{ "%02d"|format(loop.index) }}</div><div class="popular-name"><b>{{ item._id }}</b><small>Issued {{ item.borrow_count }} time{{ '' if item.borrow_count==1 else 's' }}</small></div><span class="popular-number">#{{ loop.index }}</span></div>{% endfor %}</div>{% else %}<div class="empty-state">Popular titles will appear as books are issued.</div>{% endif %}
+  </div>
+</section>
+
+<section class="panel recent-panel">
+  <div class="panel-heading"><div><span class="eyebrow">LATEST MOVEMENT</span><h3>Recent issue slips</h3></div><a class="text-link" href="{{ url_for('issue_register') }}">Open issue register <svg class="icon icon-small"><use href="#i-arrow-up-right"/></svg></a></div>
+  {% if recent %}<div class="table-wrap"><table><thead><tr><th>ISSUE ID</th><th>BOOK</th><th>STUDENT</th><th>ISSUED</th><th>STATUS</th></tr></thead><tbody>{% for r in recent %}<tr><td><a class="issue-code" href="{{ url_for('issue_slip', issue_code=r.issue_code) }}">{{ r.issue_code }}</a></td><td><b>{{ r.book_title }}</b></td><td>{{ r.member_name }}</td><td>{{ r.borrowed_at|datefmt }}</td><td><span class="status {{ r.status }}">{{ 'On loan' if r.status=='borrowed' else 'Returned' }}</span></td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state">No issues recorded yet. Create your first issue slip at the desk.</div>{% endif %}
+</section>
+{% endblock %}
