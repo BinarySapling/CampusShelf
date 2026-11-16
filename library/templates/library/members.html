@@ -1,0 +1,36 @@
+{% extends "library/base.html" %}
+{% block title %}Students{% endblock %}
+{% block heading %}Student directory{% endblock %}
+{% block content %}
+<div class="page-intro"><p>Register students for accurate issue slips. A unique Student ID is generated automatically for each registration.</p><span class="collection-chip"><svg class="icon icon-small"><use href="#i-users"/></svg> STUDENT DIRECTORY / 02</span></div>
+<div class="split-layout">
+  <section class="panel form-panel">
+    <div class="panel-heading"><div><span class="eyebrow">LIBRARY REGISTRATION</span><h3>Register a student</h3></div><span class="panel-spark"><svg class="icon"><use href="#i-sparkles"/></svg></span></div>
+    <form method="post" class="form-grid">{% csrf_token %}
+      <label>Student name *<input name="name" required maxlength="100" placeholder="Full name"></label>
+      <label>Student email *<input type="email" name="email" required maxlength="160" placeholder="name@campus.edu"></label>
+      <label>Course / department *<input name="course" required maxlength="60" placeholder="e.g. CSE"></label>
+      <label>Study year *<select name="year">{% for y in years %}<option value="{{ y }}">Year {{ y }}</option>{% endfor %}</select></label>
+      <label>Student portal password *<input type="password" name="password" required minlength="10" maxlength="256" autocomplete="new-password" placeholder="At least 10 characters"></label>
+      <label>Confirm password *<input type="password" name="confirm_password" required minlength="10" maxlength="256" autocomplete="new-password" placeholder="Enter it again"></label>
+      <p class="portal-password-note full">Have the student enter their password privately. CampusShelf stores a secure hash, never the password itself.</p>
+      <button class="btn btn-primary full" type="submit"><svg class="icon icon-small"><use href="#i-plus"/></svg> Register student</button>
+    </form>
+  </section>
+  <section class="panel">
+    <div class="panel-heading"><div><span class="eyebrow">REGISTERED BORROWERS</span><h3>Student directory</h3></div><span class="count-badge">{{ members|length }} students</span></div>
+    <div class="member-list">{% for m in members %}
+      <div class="member-row"><div class="member-avatar avatar-{% cycle '1' '2' '3' '4' '0' %}">{{ m.name|slice:":1"|upper }}</div><div class="member-details"><b>{{ m.name }}</b><span class="member-id-label">Student ID <code>{{ m.student_id|default:'Generating…' }}</code></span><span>{{ m.email }}</span><small>{{ m.course }} · Year {{ m.year }}</small>
+        <details class="member-access-details"><summary>{% if m.portal_password_set %}Portal access ready{% else %}Set portal password{% endif %} <span>· {% if m.portal_password_set %}change password{% else %}required for student checkout{% endif %}</span></summary>
+          <form method="post" action="{% url 'reset_member_portal_password' m.id %}" class="member-password-form">{% csrf_token %}
+            <label>New password<input type="password" name="password" minlength="10" maxlength="256" autocomplete="new-password" required placeholder="At least 10 characters"></label>
+            <label>Confirm password<input type="password" name="confirm_password" minlength="10" maxlength="256" autocomplete="new-password" required placeholder="Enter it again"></label>
+            <button class="btn btn-secondary" type="submit">{% if m.portal_password_set %}Update password{% else %}Set password{% endif %}</button>
+            <small>Ask the student to enter it privately. Only a secure hash is saved.</small>
+          </form>
+        </details>
+      </div><form method="post" action="{% url 'delete_member' m.id %}" onsubmit="return confirm('Remove this student? Historical issue slips remain.')">{% csrf_token %}<button class="subtle-danger" type="submit">Remove</button></form></div>
+    {% empty %}<div class="empty-state">Register a student here before issuing their first book.</div>{% endfor %}</div>
+  </section>
+</div>
+{% endblock %}

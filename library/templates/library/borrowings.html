@@ -1,0 +1,187 @@
+{% extends "library/base.html" %}
+{% block title %}Issue desk{% endblock %}
+{% block heading %}Issue & return desk{% endblock %}
+{% block content %}
+<div class="page-intro">
+  <p>Find the student and enter the book's unique Copy ID to detect its title, create an issue slip, or check a return by Issue ID.</p>
+  <div class="page-actions"><span class="collection-chip"><svg class="icon icon-small"><use href="#i-issue"/></svg> LIBRARIAN DESK / 03</span><a class="text-link" href="{% url 'issue_register' %}">Register <svg class="icon icon-small"><use href="#i-arrow-up-right"/></svg></a></div>
+</div>
+
+<div class="desk-grid">
+  <section class="panel form-panel issue-panel">
+    <div class="panel-heading">
+      <div><span class="eyebrow">NEW CIRCULATION RECORD</span><h3>Issue a book</h3></div>
+      <span class="panel-spark"><svg class="icon"><use href="#i-sparkles"/></svg></span>
+    </div>
+    <form method="post" class="issue-form" id="issue-form">{% csrf_token %}
+      <label>Find a student
+        <input id="student-search" type="search" placeholder="Search by student ID, name, email or course…" autocomplete="off" aria-label="Search registered students" aria-controls="student-results" aria-expanded="false">
+        <input id="member-id" type="hidden" name="member_id">
+        <div class="search-results" id="student-results" role="listbox" aria-label="Student search results"><p class="search-results-note">Enter at least 2 characters to search.</p></div>
+      </label>
+      <div class="selection-card student-selection" id="student-details" aria-live="polite">
+        <span class="selection-icon"><svg class="icon"><use href="#i-user"/></svg></span><div><b>Select a student</b><small>Search by Student ID, name or email.</small></div>
+      </div>
+      <label>Enter the unique Copy ID printed inside the book
+        <input id="book-search" type="text" placeholder="CSB-64A1B2C3…" autocomplete="off" aria-label="Enter a unique available book Copy ID" aria-controls="book-results" aria-expanded="false">
+        <input id="book-id" type="hidden" name="book_id">
+        <input id="book-copy-id" type="hidden" name="copy_id">
+        <div class="search-results" id="book-results" role="listbox" aria-label="Copy ID lookup result"><p class="search-results-note">Enter the book's unique Copy ID. Its title and shelf will be detected automatically.</p></div>
+      </label>
+      <div class="selection-card book-selection" id="book-details" aria-live="polite">
+        <span class="selection-icon"><svg class="icon"><use href="#i-book"/></svg></span><div><b>Enter a Copy ID</b><small>Book title, author and shelf location will appear automatically.</small></div>
+      </div>
+      <div class="issue-policy"><span><svg class="icon"><use href="#i-clock"/></svg></span><div><b>14 day loan period</b><small>Due date is set automatically. A printable issue slip opens after checkout.</small></div></div>
+      <small class="selection-error" id="issue-form-error" role="alert"></small>
+      <button class="btn btn-primary issue-submit" type="submit">Create issue slip <svg class="icon icon-small"><use href="#i-arrow-up-right"/></svg></button>
+    </form>
+  </section>
+
+  <section class="panel return-panel">
+    <div class="panel-heading">
+      <div><span class="eyebrow">CLOSE AN ACTIVE LOAN</span><h3>Mark a return</h3></div>
+      <span class="stat-icon mint"><svg class="icon"><use href="#i-return"/></svg></span>
+    </div>
+    <p class="return-copy">Use the Issue ID printed on a slip or found in the register. The copy will return to available shelf stock.</p>
+    <form method="post" action="{% url 'return_by_issue_id' %}" class="return-id-form">{% csrf_token %}
+      <label for="issue-code-input">Issue ID</label>
+      <div class="issue-id-entry"><span>#</span><input id="issue-code-input" name="issue_code" placeholder="CS-64A1…" required autocomplete="off" aria-describedby="issue-id-help"></div>
+      <small id="issue-id-help">Example: CS-64A1B2C3D4E5F60718293ABC</small>
+      <button class="btn btn-dark" type="submit">Find issue & mark returned <svg class="icon icon-small"><use href="#i-arrow-up-right"/></svg></button>
+    </form>
+    <div class="return-tip"><span><svg class="icon"><use href="#i-sparkles"/></svg></span><p>Returning by ID helps avoid choosing the wrong student's copy.</p></div>
+  </section>
+</div>
+
+<script>
+  const searchConfigs = [
+    {input: document.getElementById('student-search'), results: document.getElementById('student-results'), hidden: document.getElementById('member-id'), card: document.getElementById('student-details'), endpoint: '/api/students/search', kind: 'student'},
+    {input: document.getElementById('book-search'), results: document.getElementById('book-results'), hidden: document.getElementById('book-id'), copyHidden: document.getElementById('book-copy-id'), card: document.getElementById('book-details'), endpoint: '/api/book-copies/lookup', kind: 'copy'}
+  ];
+
+  function setSelection(card, iconName, title, detail) {
+    const symbol = document.createElement('span');
+    symbol.className = 'selection-icon';
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'icon');
+    const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+    use.setAttribute('href', '#i-' + iconName);
+    svg.append(use);
+    symbol.append(svg);
+    const content = document.createElement('div');
+    const heading = document.createElement('b');
+    heading.textContent = title;
+    const caption = document.createElement('small');
+    caption.textContent = detail;
+    content.append(heading, caption);
+    card.replaceChildren(symbol, content);
+  }
+
+  function addSearchNote(container, message) {
+    const note = document.createElement('p');
+    note.className = 'search-results-note';
+    note.textContent = message;
+    container.replaceChildren(note);
+  }
+
+  function renderResults(config, items) {
+    config.results.replaceChildren();
+    if (!items.length) {
+      addSearchNote(config.results, config.kind === 'copy' ? 'No available copy matches that ID. Check the label or ask a librarian.' : 'No registered students match that search.');
+      config.input.setAttribute('aria-expanded', 'false');
+      return;
+    }
+    if (config.kind === 'copy' && items.length === 1) {
+      const item = items[0];
+      config.hidden.value = item.book_id;
+      config.copyHidden.value = item.copy_id;
+      config.input.value = item.copy_id;
+      config.input.setAttribute('aria-expanded', 'false');
+      addSearchNote(config.results, 'Copy ID matched. Its exact title and shelf have been detected.');
+      setSelection(config.card, 'book', item.title, 'Copy ' + item.copy_id + ' · By ' + item.author + ' · ' + item.copies + ' on shelf · Shelf ' + item.shelf);
+      document.getElementById('issue-form-error').textContent = '';
+      return;
+    }
+    for (const item of items) {
+      const option = document.createElement('button');
+      option.type = 'button';
+      option.className = 'search-result-option';
+      option.setAttribute('role', 'option');
+      option.setAttribute('aria-selected', 'false');
+      const primary = document.createElement('b');
+      const secondary = document.createElement('small');
+      if (config.kind === 'copy') {
+        primary.textContent = item.title;
+        secondary.textContent = item.copy_id + ' · ' + item.author + ' · ' + item.category + ' · Shelf ' + item.shelf + ' · ' + item.copies + ' copies on shelf';
+      } else {
+        primary.textContent = item.name;
+        secondary.textContent = item.student_id + ' · ' + item.email + ' · ' + item.course + ' · Year ' + item.year;
+      }
+      option.append(primary, secondary);
+      option.addEventListener('click', () => {
+        config.hidden.value = item.id;
+        config.input.value = config.kind === 'copy' ? item.copy_id : item.name;
+        config.input.setAttribute('aria-expanded', 'false');
+        addSearchNote(config.results, config.kind === 'copy' ? 'Copy ID matched. Its exact title and shelf have been detected.' : 'Student selected. Search again to choose another.');
+        if (config.kind === 'copy') {
+          config.copyHidden.value = item.copy_id;
+          setSelection(config.card, 'book', item.title, 'Copy ' + item.copy_id + ' · By ' + item.author + ' · ' + item.copies + ' on shelf · Shelf ' + item.shelf);
+        } else {
+          setSelection(config.card, 'user', item.name, item.student_id + ' · ' + item.email + ' · ' + item.course + ' · Year ' + item.year);
+        }
+        document.getElementById('issue-form-error').textContent = '';
+      });
+      config.results.append(option);
+    }
+    config.input.setAttribute('aria-expanded', 'true');
+  }
+
+  for (const config of searchConfigs) {
+    let timer;
+    let sequence = 0;
+    config.input.addEventListener('input', () => {
+      config.hidden.value = '';
+      if (config.copyHidden) config.copyHidden.value = '';
+      const searchTerm = config.input.value.trim();
+      if (config.kind === 'copy') {
+        setSelection(config.card, 'book', 'Enter a Copy ID', 'Book title, author and shelf location will appear automatically.');
+      } else {
+        setSelection(config.card, 'user', 'Select a student', 'Search by Student ID, name or email.');
+      }
+      window.clearTimeout(timer);
+      if (searchTerm.length < 2) {
+        addSearchNote(config.results, config.kind === 'copy' ? 'Enter the unique Copy ID printed inside the book.' : 'Enter at least 2 characters to search.');
+        config.input.setAttribute('aria-expanded', 'false');
+        return;
+      }
+      addSearchNote(config.results, 'Searching the indexed library records…');
+      const currentSequence = ++sequence;
+      timer = window.setTimeout(async () => {
+        try {
+          const response = await fetch(config.endpoint + '?q=' + encodeURIComponent(searchTerm));
+          const payload = await response.json();
+          if (currentSequence !== sequence) return;
+          if (!response.ok) throw new Error(payload.error || 'Search is unavailable.');
+          renderResults(config, payload.results || []);
+        } catch (error) {
+          if (currentSequence !== sequence) return;
+          addSearchNote(config.results, error.message || 'Could not load search results.');
+          config.input.setAttribute('aria-expanded', 'false');
+        }
+      }, 220);
+    });
+  }
+
+  document.getElementById('issue-form').addEventListener('submit', event => {
+    const memberId = document.getElementById('member-id');
+    const bookId = document.getElementById('book-id');
+    const copyId = document.getElementById('book-copy-id');
+    const formError = document.getElementById('issue-form-error');
+    if (!memberId.value || !bookId.value || !copyId.value) {
+      event.preventDefault();
+      formError.textContent = !memberId.value && !copyId.value ? 'Search for the student and enter an available book Copy ID.' : !memberId.value ? 'Search and select a registered student first.' : 'Enter a valid available book Copy ID first.';
+      (!memberId.value ? document.getElementById('student-search') : document.getElementById('book-search')).focus();
+    }
+  });
+</script>
+{% endblock %}

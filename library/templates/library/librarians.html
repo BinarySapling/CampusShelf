@@ -1,0 +1,25 @@
+{% extends "library/base.html" %}
+{% block title %}Librarians{% endblock %}
+{% block heading %}Librarian access{% endblock %}
+{% block content %}
+<div class="page-intro"><p>Create staff IDs for the librarians who manage this collection. Each account has its own password and sign-in.</p><span class="collection-chip"><svg class="icon icon-small"><use href="#i-users"/></svg> STAFF ACCOUNTS / {{ librarians|length }}</span></div>
+<div class="librarian-admin-grid">
+  <section class="panel librarian-add-panel">
+    <div class="panel-heading"><div><span class="eyebrow">NEW STAFF ACCOUNT</span><h3>Add a librarian</h3></div><span class="panel-spark"><svg class="icon"><use href="#i-user"/></svg></span></div>
+    <form method="post" class="librarian-add-form">{% csrf_token %}
+      <label for="staff-name">Full name</label><input id="staff-name" name="name" placeholder="e.g. Ayesha Khan" maxlength="80" required autocomplete="name">
+      <div class="auto-id-note"><svg class="icon"><use href="#i-sparkles"/></svg><span>A unique librarian ID will be generated automatically after creation.</span></div>
+      <label for="staff-password">Temporary password</label><input id="staff-password" name="password" type="password" placeholder="At least 10 characters" minlength="10" required autocomplete="new-password"><small>Share this password with the librarian securely. They can sign in at the CampusShelf login page.</small>
+      <button class="btn btn-primary" type="submit">Create staff account <svg class="icon icon-small"><use href="#i-arrow-up-right"/></svg></button>
+    </form>
+  </section>
+  <section class="panel librarian-list-panel">
+    <div class="panel-heading"><div><span class="eyebrow">ACCESS ROSTER</span><h3>Library team</h3></div><span class="staff-count">{{ active_librarian_count }} active</span></div>
+    <div class="staff-list">
+      {% for librarian in librarians %}<article class="staff-row"><div class="staff-avatar">{{ librarian.name|slice:":1"|upper }}</div><div class="staff-info"><b>{{ librarian.name }}</b><span>ID <code>{{ librarian.login_id|upper }}</code></span><small>Added {{ librarian.created_at|date:"d M Y" }}</small></div><span class="staff-status {% if not librarian.active %}disabled{% endif %}">{% if librarian.active %}Active{% else %}Disabled{% endif %}</span>{% if librarian.active and librarian.id != current_librarian_id %}<form method="post" action="{% url 'deactivate_librarian' librarian.id %}" onsubmit="return confirm('Disable this librarian ID? They will no longer be able to sign in.')">{% csrf_token %}<button class="staff-disable" type="submit">Disable ID</button></form>{% endif %}</article>
+      {% empty %}<p class="staff-empty">No librarian accounts yet.</p>{% endfor %}
+    </div>
+    <div class="staff-note"><svg class="icon"><use href="#i-sparkles"/></svg><p><b>One account stays active.</b><span>That keeps someone on the team able to manage staff access.</span></p></div>
+  </section>
+</div>
+{% endblock %}
