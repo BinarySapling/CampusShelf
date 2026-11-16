@@ -1,91 +1,111 @@
-# CampusShelf — MongoDB + PyMongo library desk
+# CampusShelf — React + Django + MongoDB
 
-A small, librarian-focused library management app built with Flask and PyMongo. It demonstrates a practical multi-collection MongoDB design, indexed catalogue search, stock tracking, issue slips, returns, and aggregation-based insights.
+CampusShelf is a campus library app. React and Vite provide the browser interface; Django provides simple function-based views, forms, JSON responses, models, sessions, authentication, and Admin. MongoDB remains the application database through the official Django MongoDB Backend.
 
-## Librarian features
+## Features
 
-- Overview cards for catalogue titles, copies on the shelf, active issues, overdue returns and registered students
-- Six-month issue and return chart, plus a live inventory breakdown by category
-- Book catalogue with total, available and on-loan copy counts, shelf locations, ISBN and descriptions
-- MongoDB text-index search across title, author, category, ISBN and description
-- Student directory with generated `STU-` IDs, email, course and study year
-- Issue slips with unique IDs in the form `CS-<ObjectId>`; returns can be marked by entering that ID
-- Librarian checkout resolves an exact available `CSB-<ObjectId>` Copy ID to its book title and shelf, then reserves that same physical copy
-- Due-date tracking with overdue indicators and quick check-in actions
-- Reader notes and useful aggregation reports
-- Librarian ID/password sign-in with generated `LIB-` IDs, first-run account setup, and a staff access roster for adding or disabling accounts
-- Public student portal for indexed title/author search, shelf and live copy availability, and self-checkout using a Student ID, registered campus email, portal password, and unique copy ID
-- Printable student issue slips and per-copy ID labels; book returns remain at the librarian desk
+- Librarian dashboard, catalogue, issue register, reviews, and Django Admin
+- Unique Copy IDs with printable QR labels for every physical copy
+- Student signup requests that stay pending until a librarian approves them
+- Student self-checkout by scanning an available copy QR after signing in
+- Librarian QR returns, with an issue slip and 14-day loan period
+- Automatic overdue fine of ₹20 for each calendar day after the due date
+- Custom student fines with unpaid and paid status
+- Django session login and CSRF protection for React requests
 
 ## Run locally
 
-1. Install Python 3.10+.
-2. Open a terminal in this folder.
-3. Create a virtual environment (recommended): `py -m venv .venv` on Windows, or `python3 -m venv .venv` on macOS/Linux.
-4. Activate it and install dependencies: `pip install -r requirements.txt`.
-5. Copy `.env.example` to `.env`, set `MONGO_URI` to your Atlas connection URI, and keep `DB_NAME=campusshelf`.
-6. In Atlas, allow your current IP under Network Access and configure a database user. URL-encode special characters in the password.
-7. Start the app with `python app.py` and open `http://127.0.0.1:5000`.
-8. On the first visit, create the first librarian account and password; CampusShelf generates its ID and shows it on the overview. Later visits require that ID and password. Signed-in librarians can add staff accounts and share their generated IDs from the Librarians page.
-9. Open `/health` to confirm the connection, collections and indexes.
+1. Use Python 3.12 or newer and Node.js 22.12 or newer.
+2. Create and activate a Python virtual environment, then install Django requirements:
 
-## Database design
+   ```powershell
+   py -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+   pip install -r requirements.txt
+   ```
 
-CampusShelf uses six collections:
+3. Copy `.env.example` to `.env` and set `MONGO_URI` to your MongoDB connection string. Keep `DB_NAME=campusshelf` to use the existing CampusShelf collections.
+4. Apply Django migrations and, if wanted, add sample catalogue data:
 
-- `books`: title, author, category, ISBN, total copies, available copies, availability, shelf, description
-- `book_copies`: one record per physical copy, unique printable copy ID, shelf, available/borrowed state and active issue reference
-- `members`: generated student ID, student name, email, password hash, course and study year
-- `borrowings`: book/student ObjectId references, issue ID, contact and title snapshots, status and timestamps
-- `reviews`: book/student references and snapshots, rating and comment
-- `librarians`: generated normalized login ID, name, password hash, active status and creation time
+   ```powershell
+   python manage.py migrate
+   python manage.py seed_data
+   ```
 
-`books.copies` means copies currently on the shelf. `books.total_copies` is the whole collection count for that title. Each physical copy also has one stable `CSB-<ObjectId>` label in `book_copies`; new labels are generated when inventory is added, and legacy inventory is backfilled on startup. Student and librarian IDs are automatically generated and uniquely indexed. Librarian checkout looks up a copy by its unique ID, detects its title and shelf, and reserves that exact physical copy. Issues decrement shelf counts; librarian returns release the same copy and restore the shelf count. Students can search the public catalogue and check out an available copy using their `STU-` ID, registered campus email, password and copy label ID. Returns are only available through the librarian workspace.
+   The seed command adds books and members only when those collections are empty. It does not create sample passwords.
 
-Issue slips keep student and book snapshots so old records remain useful if a directory entry or title is later removed. Existing records also receive a stable issue ID at startup. Seed data is inserted only when a collection is empty.
+5. Install the frontend packages:
 
-## Indexes and validation
+   ```powershell
+   npm --prefix frontend install
+   ```
 
-Indexes are created automatically:
+6. Start Django in one terminal and React in another:
 
-- `books.title` for catalogue sorting
-- `books_search_text` over title, author, category, ISBN and description
-- `books.category + books.available` for inventory filtering
-- unique `book_copies.copy_id` and `book_copies.book_id + book_copies.status` for label lookup and stock reservation
-- librarian copy-ID lookup uses the unique `book_copies.copy_id` index and conditionally reserves the requested physical copy
-- unique partial `books.isbn`
-- unique `members.email`
-- unique partial `members.student_id`
-- portal checkout validates the registered email and Werkzeug password hash before touching copy or loan records; librarians can set or reset a student's portal password from the directory
-- `borrowings.member_id + borrowings.status`
-- `borrowings.member_student_id + borrowings.borrowed_at` for student-ID issue lookups
-- descending `borrowings.borrowed_at`
-- `borrowings.status + borrowings.due_at` for overdue checks
-- `borrowings.returned_at` for return trends
-- unique `borrowings.issue_code`
-- `reviews.book_id + reviews.rating`
-- unique `librarians.login_id` for case-insensitive librarian sign-in
+   ```powershell
+   python manage.py runserver
+   ```
 
-MongoDB JSON Schema validators complement form checks for required fields, data types, non-negative copy counts, study year, borrowing status and review ratings.
+   ```powershell
+   npm --prefix frontend run dev
+   ```
 
-## MongoDB operations demonstrated
+7. Open `http://localhost:5173/`. The React dev server proxies `/api` and `/admin` to Django on port 8000. On first use, create a librarian account in the sign-in screen.
 
-- CRUD: add/remove books and students, self-checkout or librarian issue, librarian return and reader notes
-- Reads: exact filters, sorting, category filtering and `$text` search backed by the text index
-- Updates: atomic copy reservation, conditional stock decrement, copy release and return status updates
-- Aggregation: `$group`, `$sum`, `$avg`, `$sort`, `$limit`, monthly issue/return trends and category inventory
-- Data modeling: ObjectId references plus snapshots for readable historical issue slips
+The QR camera needs a secure browser context: HTTPS on Vercel or `localhost` during development. Students can use the scanner’s image option when a camera is unavailable.
 
-## End-to-end smoke test
+## Deploy on Vercel
 
-After setting up `.env` and dependencies, run:
+The root [`vercel.json`](vercel.json) defines a React frontend service and a Django backend service under one domain. In Vercel, connect the repository from its root and select the **Services** framework preset. Vercel currently documents Services as a beta feature, so the account must have Services enabled.
 
-```bash
-python -m unittest discover -s tests -v
+Set these Vercel environment variables for Preview and Production:
+
+- `MONGO_URI` — MongoDB connection string
+- `DB_NAME` — `campusshelf`
+- `SECRET_KEY` — a private random Django secret
+- `DEBUG` — `false`
+- `LIBRARIAN_SETUP_CODE` — a private code for creating the first librarian account; share it only with the librarian who will perform setup
+
+Apply migrations once against the intended MongoDB database before sending users to the deployment. MongoDB Atlas must allow the deployment’s configured Vercel egress. Keep the access list restricted to the egress addresses configured for the project.
+
+## Existing MongoDB data
+
+Books, physical copies, members, borrowing history, and reviews continue to use the existing `books`, `book_copies`, `members`, `borrowings`, and `reviews` collections. Django migrations add the signup request collection and fine entries, and add an approval status to members. Existing member records default to approved, and a signup using an existing unlinked student email can be connected to that record during approval.
+
+The previous Flask `librarians` collection is not used for Django sign-in. Create new librarian accounts through the first-run setup. Previous Werkzeug password hashes cannot be used by Django; reset old student portal passwords from the librarian tools.
+
+## Project layout
+
+- `frontend/` — React screens, QR scanner, Vite configuration, and browser styles
+- `campusshelf/` — Django project settings, URLs, and MongoDB-compatible built-in app migrations
+- `library/models.py` — books, copies, members, signup requests, loans, reviews, and fines
+- `library/forms.py` — validation for student signup, books, reviews, checkout, and fines
+- `library/api.py` and `library/api_urls.py` — small Django JSON endpoints for the React app
+- `library/views.py` and `library/urls.py` — Django page views retained for syllabus practice
+- `library/templates/library/` — Django Template Language examples
+- `vercel.json` — Vercel frontend/backend service routing
+
+## INT253 topics covered
+
+- **Unit I:** Django project and app structure, settings, `manage.py`, and local setup
+- **Unit II:** function-based views, URL parameters, GET/POST, JSON responses, and error status codes
+- **Unit III:** Django templates, inheritance, loops, conditions, debugging, and Django tests; React uses simple components and state for the requested frontend
+- **Unit IV:** Django forms, validation, CSRF cookies and headers, POST actions, and redirects
+- **Unit V:** models, MongoDB collections, foreign keys, migrations, ORM, Admin, users, groups, and permissions
+- **Unit VI:** login/logout, authenticated views, MongoDB-backed sessions, and the existing catalogue preference cookie
+
+The code avoids a REST framework and keeps the backend in ordinary Django views and forms. React uses basic components, `useState`, and `useEffect`.
+
+## Useful checks
+
+```powershell
+python manage.py check
+python manage.py makemigrations library
+python manage.py migrate
+python manage.py test library.tests
+npm --prefix frontend run build
 ```
 
-The test uses a uniquely named temporary database on the configured Atlas cluster. It checks page rendering, catalogue search, CRUD flows, duplicate validation, issue/return stock counts, issue IDs, insights, indexes and schema validation, then drops only its temporary test database. It does not delete the normal `campusshelf` database.
+Run Django tests with a MongoDB test database available. The test runner creates and removes a separate database with the `test_` prefix. It does not write test records to the configured `campusshelf` database.
 
-## Scope
-
-This academic demo provides a shared librarian workspace with individual staff sign-ins. It does not include fine-grained staff roles, multi-document transactions or automated due-date notifications.
+For MongoDB connection and feature details, see the [official Django MongoDB Backend documentation](https://www.mongodb.com/docs/languages/python/django-mongodb/current/).
