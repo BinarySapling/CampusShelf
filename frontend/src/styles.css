@@ -237,18 +237,6 @@ code { padding: 3px 5px; border-radius: 5px; background: #f6f4ff; color: #5d50c1
   .search-row { align-items: stretch; }
   .search-row .button { padding-inline: 11px; }
 }
-@media print {
-  body { background: #fff; }
-  .sidebar, .topbar, .page-title, .content-grid, .dashboard-hero, .dashboard-intro, .book-detail-hero, .student-welcome, .detail-next-step, .panel-head .button, .notice, .toast, .sidebar-help, .slip-actions { display: none !important; }
-  .main-area { width: 100%; margin: 0; padding: 0; }
-  .qr-panel { border: 0; }
-  .qr-grid { grid-template-columns: repeat(3, 1fr); }
-  .qr-card { break-inside: avoid; }
-  .issue-slip { break-inside: avoid; }
-  .slip-full { grid-template-columns: minmax(0, 1fr) 190px; border: 1px solid #999; box-shadow: none; }
-  body:has(.slip-full) .page-content > *:not(.slip-full) { display: none !important; }
-}
-
 /* Keep page headings and photos consistent while giving each page more room. */
 .page-title-image { align-items: center; }
 .page-title-image > div { flex: 1; }
@@ -369,7 +357,12 @@ code { padding: 3px 5px; border-radius: 5px; background: #f6f4ff; color: #5d50c1
   .sidebar nav button { min-width: 65px; }
 }
 @media print {
-  .dashboard-hero, .dashboard-intro, .book-detail-hero, .student-welcome, .detail-next-step, .slip-actions { display: none !important; }
+  body { background: #fff; }
+  .sidebar, .topbar, .page-title, .content-grid, .dashboard-hero, .dashboard-intro, .book-detail-hero, .student-welcome, .detail-next-step, .panel-head .button, .notice, .toast, .sidebar-help, .slip-actions { display: none !important; }
+  .main-area { width: 100%; margin: 0; padding: 0; }
+  .qr-panel { border: 0; }
+  .qr-grid { grid-template-columns: repeat(3, 1fr); }
+  .qr-card, .issue-slip { break-inside: avoid; }
   .slip-full { grid-template-columns: minmax(0, 1fr) 190px; border: 1px solid #999; box-shadow: none; }
 }
 
