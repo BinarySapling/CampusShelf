@@ -45,8 +45,8 @@ class Member(models.Model):
     year = models.PositiveSmallIntegerField(default=1)
     approval_status = models.CharField(max_length=12, choices=APPROVAL_CHOICES, default=APPROVED)
     joined_at = models.DateTimeField(default=timezone.now)
-    # Old Flask records have this field. New passwords belong on the Django User.
-    password_hash = models.CharField(max_length=256, blank=True, default="")
+    # The legacy MongoDB validator requires a non-empty value; passwords now live on Django User.
+    password_hash = models.CharField(max_length=256, blank=True, default="!")
 
     class Meta:
         db_table = "members"

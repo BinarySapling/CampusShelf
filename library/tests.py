@@ -325,6 +325,89 @@ class CampusShelfFeatureApiTests(TestCase):
         self.assertEqual(login.status_code, 200)
         self.assertEqual(login.json()["user"]["role"], "student")
 
+    def test_librarian_can_get_qr_details_for_every_copy(self):
+        other_book = Book.objects.create(
+            title="Second QR Book",
+            author="B. Writer",
+            category="History",
+            copies=1,
+            total_copies=1,
+            available=True,
+            shelf="H-02",
+        )
+        other_copy = BookCopy.objects.create(
+            book=other_book,
+            copy_id=copy_code_for(other_book.id),
+            book_title=other_book.title,
+            shelf=other_book.shelf,
+        )
+
+        response = self.staff_client.get("/api/books/copies/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertCountEqual(
+            [item["copy_id"] for item in response.json()["results"]],
+            [self.copy.copy_id, other_copy.copy_id],
+        )
+        other_row = next(item for item in response.json()["results"] if item["copy_id"] == other_copy.copy_id)
+        self.assertEqual(other_row["book_title"], "Second QR Book")
+
+    def test_students_cannot_get_librarian_qr_label_list(self):
+        student = User.objects.create_user(username="student-qr-list", password="StrongPass123!")
+        student_client = Client()
+        student_client.force_login(student)
+
+        response = student_client.get("/api/books/copies/")
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_book_copy_labels_show_who_has_the_copy_and_student_slip_details(self):
+        student_user = User.objects.create_user(username="student-slip-test", password="StrongPass123!")
+        member = Member.objects.create(
+            user=student_user,
+            student_id="STU-SLIP-01",
+            name="Slip Reader",
+            email="slip.reader@campus.edu",
+            course="CSE",
+            year=2,
+            approval_status=Member.APPROVED,
+        )
+        due_at = timezone.now() + timedelta(days=14)
+        loan = Borrowing.objects.create(
+            book=self.book,
+            member=member,
+            book_copy=self.copy,
+            issue_code="CS-ISSUE-SLIP-API-TEST",
+            copy_id=self.copy.copy_id,
+            book_title=self.book.title,
+            book_author=self.book.author,
+            book_category=self.book.category,
+            book_shelf=self.book.shelf,
+            member_name=member.name,
+            member_email=member.email,
+            member_student_id=member.student_id,
+            status=Borrowing.BORROWED,
+            borrowed_at=timezone.now(),
+            due_at=due_at,
+        )
+        self.copy.status = BookCopy.BORROWED
+        self.copy.current_member = member
+        self.copy.current_issue_code = loan.issue_code
+        self.copy.save(update_fields=["status", "current_member", "current_issue_code"])
+
+        copies = self.staff_client.get(f"/api/books/{self.book.id}/copies/")
+        self.assertEqual(copies.status_code, 200)
+        self.assertEqual(copies.json()["results"][0]["borrowed_to"], member.name)
+        self.assertEqual(copies.json()["results"][0]["issue_code"], loan.issue_code)
+
+        student_client = Client()
+        student_client.force_login(student_user)
+        slip = student_client.get("/api/student/loans/")
+        self.assertEqual(slip.status_code, 200)
+        self.assertEqual(slip.json()["results"][0]["book_author"], self.book.author)
+        self.assertEqual(slip.json()["results"][0]["book_shelf"], self.book.shelf)
+        self.assertEqual(slip.json()["results"][0]["issue_code"], loan.issue_code)
+
     def test_librarian_cannot_issue_a_sixth_active_book(self):
         member = Member.objects.create(
             student_id="STU-LIMIT-01",

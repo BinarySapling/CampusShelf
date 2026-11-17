@@ -2,6 +2,8 @@ from functools import wraps
 
 from bson import ObjectId
 from django.contrib.auth import authenticate, get_user_model
+from django.contrib.auth import update_session_auth_hash
+from django.contrib.auth.forms import PasswordChangeForm
 from django.contrib.auth import login as auth_login
 from django.contrib.auth import logout as auth_logout
 from django.db.models import Q
@@ -117,7 +119,11 @@ def borrowing_data(record):
         "issue_code": record.issue_code,
         "copy_id": record.copy_id,
         "book_title": record.book_title,
+        "book_author": record.book_author,
+        "book_category": record.book_category,
+        "book_shelf": record.book_shelf,
         "member_name": record.member_name,
+        "member_email": record.member_email,
         "student_id": record.member_student_id,
         "status": record.status,
         "borrowed_at": record.borrowed_at.isoformat(),
@@ -203,6 +209,22 @@ def setup_librarian(request):
 def logout_user(request):
     auth_logout(request)
     return JsonResponse({"ok": True})
+
+
+@require_POST
+def change_password(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Please sign in first."}, status=401)
+    if not account_data(request.user):
+        return JsonResponse({"error": "An active library account is required."}, status=403)
+
+    form = PasswordChangeForm(request.user, request.POST)
+    if not form.is_valid():
+        return JsonResponse({"errors": form_errors(form)}, status=400)
+
+    user = form.save()
+    update_session_auth_hash(request, user)
+    return JsonResponse({"ok": True, "message": "Your password has been changed."})
 
 
 @require_POST
@@ -403,12 +425,32 @@ def copies_list(request, book_id):
     object_id = to_object_id(book_id)
     book = get_object_or_404(Book, pk=object_id) if object_id else None
     copies = BookCopy.objects.filter(book=book).order_by("copy_id")
+    active_loans = {
+        loan.copy_id: loan
+        for loan in Borrowing.objects.filter(book=book, status=Borrowing.BORROWED)
+    }
     return JsonResponse({"results": [{
         "id": str(copy.pk),
         "copy_id": copy.copy_id,
         "status": copy.status,
         "shelf": copy.shelf,
         "book_title": book.title,
+        "borrowed_to": active_loans[copy.copy_id].member_name if copy.copy_id in active_loans else "",
+        "issue_code": active_loans[copy.copy_id].issue_code if copy.copy_id in active_loans else "",
+        "due_at": active_loans[copy.copy_id].due_at.isoformat() if copy.copy_id in active_loans else "",
+    } for copy in copies]})
+
+
+@librarian_api
+@require_GET
+def all_copies_list(request):
+    copies = BookCopy.objects.select_related("book").order_by("book__title", "copy_id")
+    return JsonResponse({"results": [{
+        "id": str(copy.pk),
+        "copy_id": copy.copy_id,
+        "status": copy.status,
+        "shelf": copy.shelf,
+        "book_title": copy.book.title,
     } for copy in copies]})
 
 
