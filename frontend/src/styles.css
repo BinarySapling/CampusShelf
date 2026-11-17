@@ -365,5 +365,3 @@ code { padding: 3px 5px; border-radius: 5px; background: #f6f4ff; color: #5d50c1
   .qr-card, .issue-slip { break-inside: avoid; }
   .slip-full { grid-template-columns: minmax(0, 1fr) 190px; border: 1px solid #999; box-shadow: none; }
 }
-
-
