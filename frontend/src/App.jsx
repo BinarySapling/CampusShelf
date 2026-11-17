@@ -97,20 +97,22 @@ function AuthScreen({ onLogin, onSetup, onSignup, setupAvailable }) {
 
 function Dashboard({ setNotice }) {
   const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
   useEffect(() => {
     api("/dashboard/")
       .then(setStats)
-      .catch((error) => noticeText(setNotice, error.message, "error"));
+      .catch((error) => noticeText(setNotice, error.message, "error"))
+      .finally(() => setLoading(false));
   }, []);
   return <>
     <PageTitle eyebrow="LIBRARIAN DESK / TODAY" title="A good day to keep things moving." note="Here is what is happening across the library." />
     <div className="stats-grid">
-      <StatCard label="Titles" value={stats?.books} note="In the catalogue" />
-      <StatCard label="Physical copies" value={stats?.copies} note="Each one has a QR label" />
-      <StatCard label="Students" value={stats?.members} note="Approved portal accounts" />
-      <StatCard label="Books on loan" value={stats?.active_loans} note="Across all students" />
-      <StatCard label="Late returns" value={stats?.overdue_loans} note="Fine starts the next day" />
-      <StatCard label="Requests to review" value={stats?.pending_requests} note="Approve before portal access" />
+      <StatCard label="Titles" value={loading ? "…" : stats?.books} note="In the catalogue" />
+      <StatCard label="Physical copies" value={loading ? "…" : stats?.copies} note="Each one has a QR label" />
+      <StatCard label="Students" value={loading ? "…" : stats?.members} note="Approved portal accounts" />
+      <StatCard label="Books on loan" value={loading ? "…" : stats?.active_loans} note="Across all students" />
+      <StatCard label="Late returns" value={loading ? "…" : stats?.overdue_loans} note="Fine starts the next day" />
+      <StatCard label="Requests to review" value={loading ? "…" : stats?.pending_requests} note="Approve before portal access" />
     </div>
     <div className="feature-note"><div className="feature-icon">₹</div><div><b>Overdue fines update automatically</b><p>₹20 for each calendar day after the due date. No daily job or duplicate charge is needed.</p></div></div>
   </>;
@@ -121,10 +123,16 @@ function BooksPage({ setNotice }) {
   const [copies, setCopies] = useState(null);
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   async function loadBooks(query = "") {
-    const result = await api(`/books/?q=${encodeURIComponent(query)}`);
-    setBooks(result.results);
+    setLoading(true);
+    try {
+      const result = await api(`/books/?q=${encodeURIComponent(query)}`);
+      setBooks(result.results);
+    } finally {
+      setLoading(false);
+    }
   }
   useEffect(() => { loadBooks().catch((error) => noticeText(setNotice, error.message, "error")); }, []);
 
@@ -179,8 +187,8 @@ function BooksPage({ setNotice }) {
       </section>
       <section className="panel list-panel">
         <div className="panel-head"><div><span className="eyebrow">IN THE LIBRARY</span><h3>Collection</h3></div><button className="button light small" type="button" onClick={showAllCopies}>Show all QR labels</button><span className="pill">{books.length} titles</span></div>
-        <form className="search-row" onSubmit={(event) => { event.preventDefault(); loadBooks(search); }}><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a title or author" /><button className="button light">Search</button></form>
-        <div className="book-list">{books.map((book) => <article className="book-row" key={book.id}><div className="book-cover">▤</div><div className="book-copy"><b>{book.title}</b><span>{book.author} · {book.category}</span><small>{book.available} of {book.total} copies available · Shelf {book.shelf || "Unassigned"}</small></div><button className="button light small" onClick={() => showCopies(book)}>Copy QR labels</button></article>)}{books.length === 0 && <p className="empty">No titles found. Add the first one from the form.</p>}</div>
+        <form className="search-row" onSubmit={(event) => { event.preventDefault(); loadBooks(search).catch((error) => noticeText(setNotice, error.message, "error")); }}><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a title or author" /><button className="button light" disabled={loading}>{loading ? "Loading…" : "Search"}</button></form>
+        <div className="book-list">{books.map((book) => <article className="book-row" key={book.id}><div className="book-cover">▤</div><div className="book-copy"><b>{book.title}</b><span>{book.author} · {book.category}</span><small>{book.available} of {book.total} copies available · Shelf {book.shelf || "Unassigned"}</small></div><button className="button light small" onClick={() => showCopies(book)}>Copy QR labels</button></article>)}{loading && <p className="empty">Loading titles…</p>}{!loading && books.length === 0 && <p className="empty">No titles found. Add the first one from the form.</p>}</div>
       </section>
     </div>
     {copies && <section className="panel qr-panel"><div className="panel-head"><div><span className="eyebrow">PRINTABLE LABELS</span><h3>{copies.title || "New book copies"}</h3></div><button className="button light" onClick={() => window.print()}>Print labels</button></div><div className="qr-grid">{copies.results.map((copy) => <article className="qr-card" key={copy.id}><QRCodeSVG value={copy.copy_id} size={120} />{copies.title === "All book copies" && <span>{copy.book_title}</span>}<b>{copy.copy_id}</b><span>{copy.status === "available" ? "Available" : "On loan"} · {copy.shelf}</span></article>)}</div>{copies.results.length === 0 && <p className="empty">There are no physical copies to label yet.</p>}</section>}
@@ -189,36 +197,51 @@ function BooksPage({ setNotice }) {
 
 function RequestsPage({ setNotice }) {
   const [requests, setRequests] = useState([]);
-  async function load() { setRequests((await api("/requests/")).results); }
+  const [loading, setLoading] = useState(true);
+  const [reviewingId, setReviewingId] = useState("");
+  async function load() {
+    setLoading(true);
+    try { setRequests((await api("/requests/")).results); }
+    finally { setLoading(false); }
+  }
   useEffect(() => { load().catch((error) => noticeText(setNotice, error.message, "error")); }, []);
 
   async function review(item, action) {
+    setReviewingId(item.id);
     try {
       const result = await api(`/requests/${item.id}/${action}/`, { method: "POST", body: formBody({}) });
       noticeText(setNotice, result.student_id ? `${item.name} approved · Student ID ${result.student_id}` : result.message);
       await load();
     } catch (error) {
       noticeText(setNotice, error.message, "error");
+    } finally {
+      setReviewingId("");
     }
   }
 
   return <>
     <PageTitle eyebrow="STUDENT ACCESS / REVIEW" title="Signup requests" note="Verify the campus email and registration number before approving portal access." />
     <section className="panel"><div className="panel-head"><div><span className="eyebrow">APPLICATIONS</span><h3>Waiting for a librarian</h3></div><span className="pill">{requests.filter((item) => item.status === "pending").length} pending</span></div>
-      <div className="request-list">{requests.map((item) => <article className="request-row" key={item.id}><div className="request-avatar">{item.name.slice(0, 1).toUpperCase()}</div><div className="request-info"><b>{item.name}</b><span>{item.email}</span><small>Registration {item.registration_number} · {item.course} · Year {item.year}</small></div><span className={`status ${item.status}`}>{item.status}</span>{item.status === "pending" && <div className="row-actions"><button className="button primary small" onClick={() => review(item, "approve")}>Approve</button><button className="button danger small" onClick={() => review(item, "reject")}>Reject</button></div>}</article>)}{requests.length === 0 && <p className="empty">No signup requests yet.</p>}</div>
+      <div className="request-list">{requests.map((item) => <article className="request-row" key={item.id}><div className="request-avatar">{item.name.slice(0, 1).toUpperCase()}</div><div className="request-info"><b>{item.name}</b><span>{item.email}</span><small>Registration {item.registration_number} · {item.course} · Year {item.year}</small></div><span className={`status ${item.status}`}>{item.status}</span>{item.status === "pending" && <div className="row-actions"><button className="button primary small" disabled={Boolean(reviewingId)} onClick={() => review(item, "approve")}>{reviewingId === item.id ? "Saving…" : "Approve"}</button><button className="button danger small" disabled={Boolean(reviewingId)} onClick={() => review(item, "reject")}>Reject</button></div>}</article>)}{loading && <p className="empty">Loading signup requests…</p>}{!loading && requests.length === 0 && <p className="empty">No signup requests yet.</p>}</div>
     </section>
   </>;
 }
 
 function StudentsPage({ setNotice }) {
   const [members, setMembers] = useState([]);
-  async function load() { setMembers((await api("/members/")).results); }
+  const [loading, setLoading] = useState(true);
+  async function load() {
+    setLoading(true);
+    try { setMembers((await api("/members/")).results); }
+    finally { setLoading(false); }
+  }
   useEffect(() => { load().catch((error) => noticeText(setNotice, error.message, "error")); }, []);
   return <>
     <PageTitle eyebrow="DIRECTORY / PORTAL ACCESS" title="Students" note="Approved accounts can use their Student ID to borrow from the QR catalogue." />
     <section className="panel"><div className="panel-head"><div><span className="eyebrow">APPROVED MEMBERS</span><h3>Campus readers</h3></div><span className="pill">{members.length} students</span></div>
       <div className="table-scroll"><table><thead><tr><th>Student</th><th>Student ID</th><th>Course</th><th>Portal</th><th>Fine balance</th></tr></thead><tbody>{members.map((member) => <tr key={member.id}><td><b>{member.name}</b><small>{member.email}</small></td><td><code>{member.student_id}</code></td><td>{member.course} · Year {member.year}</td><td><span className={`status ${member.portal_ready ? "approved" : "pending"}`}>{member.portal_ready ? "Ready" : "Password needed"}</span></td><td>₹{member.fine_balance}</td></tr>)}</tbody></table></div>
-      {members.length === 0 && <p className="empty">Approved student accounts will appear here.</p>}
+      {loading && <p className="empty">Loading students…</p>}
+      {!loading && members.length === 0 && <p className="empty">Approved student accounts will appear here.</p>}
     </section>
   </>;
 }
@@ -226,6 +249,8 @@ function StudentsPage({ setNotice }) {
 function LoansPage({ setNotice }) {
   const [loans, setLoans] = useState([]);
   const [members, setMembers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState("return");
   const [copyId, setCopyId] = useState("");
   const [memberId, setMemberId] = useState("");
@@ -233,9 +258,14 @@ function LoansPage({ setNotice }) {
   const [scanInfo, setScanInfo] = useState(null);
 
   async function load() {
-    const [loanData, memberData] = await Promise.all([api("/loans/"), api("/members/catalogue/")]);
-    setLoans(loanData.results);
-    setMembers(memberData.results);
+    setLoading(true);
+    try {
+      const [loanData, memberData] = await Promise.all([api("/loans/"), api("/members/catalogue/")]);
+      setLoans(loanData.results);
+      setMembers(memberData.results);
+    } finally {
+      setLoading(false);
+    }
   }
   useEffect(() => { load().catch((error) => noticeText(setNotice, error.message, "error")); }, []);
 
@@ -254,6 +284,7 @@ function LoansPage({ setNotice }) {
   async function submit(event) {
     event.preventDefault();
     const values = mode === "issue" ? { member_id: memberId, copy_id: copyId } : { copy_id: copyId };
+    setBusy(true);
     try {
       if (mode === "issue") {
         const result = await api("/loans/", { method: "POST", body: formBody(values) });
@@ -267,6 +298,8 @@ function LoansPage({ setNotice }) {
       await load();
     } catch (error) {
       noticeText(setNotice, error.message, "error");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -276,13 +309,13 @@ function LoansPage({ setNotice }) {
       <form className="issue-controls" onSubmit={submit}>
         {mode === "issue" && <label>Approved student<select value={memberId} onChange={(event) => setMemberId(event.target.value)} required><option value="">Choose a student</option>{members.map((member) => <option value={member.id} key={member.id}>{member.name} · {member.student_id}</option>)}</select></label>}
         <label>Physical Copy ID<input value={copyId} onChange={(event) => setCopyId(event.target.value.toUpperCase())} placeholder="Scan the QR or type CSB-…" required /></label>
-        <div className="button-line"><button className="button light" type="button" onClick={() => setScanOpen((open) => !open)}>{scanOpen ? "Close scanner" : "Open camera scanner"}</button><button className="button primary">{mode === "issue" ? "Confirm issue" : "Complete return"}</button></div>
+        <div className="button-line"><button className="button light" type="button" onClick={() => setScanOpen((open) => !open)}>{scanOpen ? "Close scanner" : "Open camera scanner"}</button><button className="button primary" disabled={busy}>{busy ? "Saving…" : mode === "issue" ? "Confirm issue" : "Complete return"}</button></div>
       </form>
       <Scanner open={scanOpen} onScan={scanned} onError={(message) => noticeText(setNotice, message, "error")} />
       {scanInfo && <p className="scan-result">{scanInfo}</p>}
     </section>
     <section className="panel"><div className="panel-head"><div><span className="eyebrow">RECENT ACTIVITY</span><h3>Issue register</h3></div><span className="pill">{loans.length} records</span></div>
-      <div className="table-scroll"><table><thead><tr><th>Issue ID</th><th>Book / copy</th><th>Student</th><th>Due date</th><th>Current fine</th><th>Status</th></tr></thead><tbody>{loans.map((loan) => <tr key={loan.id}><td><code>{loan.issue_code}</code></td><td><b>{loan.book_title}</b><small>{loan.copy_id}</small></td><td>{loan.member_name}<small>{loan.student_id}</small></td><td>{new Date(loan.due_at).toLocaleDateString()}</td><td>{loan.current_fine === "0" ? "—" : `₹${loan.current_fine}`}</td><td><span className={`status ${loan.status}`}>{loan.status}</span></td></tr>)}</tbody></table></div>
+      <div className="table-scroll"><table><thead><tr><th>Issue ID</th><th>Book / copy</th><th>Student</th><th>Due date</th><th>Current fine</th><th>Status</th></tr></thead><tbody>{loans.map((loan) => <tr key={loan.id}><td><code>{loan.issue_code}</code></td><td><b>{loan.book_title}</b><small>{loan.copy_id}</small></td><td>{loan.member_name}<small>{loan.student_id}</small></td><td>{new Date(loan.due_at).toLocaleDateString()}</td><td>{loan.current_fine === "0" ? "—" : `₹${loan.current_fine}`}</td><td><span className={`status ${loan.status}`}>{loan.status}</span></td></tr>)}</tbody></table></div>{loading && <p className="empty">Loading issue records…</p>}{!loading && loans.length === 0 && <p className="empty">No books have been issued yet.</p>}
     </section>
   </>;
 }
@@ -290,16 +323,24 @@ function LoansPage({ setNotice }) {
 function FinesPage({ setNotice }) {
   const [fines, setFines] = useState([]);
   const [members, setMembers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
   async function load() {
-    const [fineData, memberData] = await Promise.all([api("/fines/"), api("/members/catalogue/")]);
-    setFines(fineData.results);
-    setMembers(memberData.results);
+    setLoading(true);
+    try {
+      const [fineData, memberData] = await Promise.all([api("/fines/"), api("/members/catalogue/")]);
+      setFines(fineData.results);
+      setMembers(memberData.results);
+    } finally {
+      setLoading(false);
+    }
   }
   useEffect(() => { load().catch((error) => noticeText(setNotice, error.message, "error")); }, []);
 
   async function addFine(event) {
     event.preventDefault();
     const form = event.currentTarget;
+    setBusy(true);
     try {
       await api("/fines/custom/", { method: "POST", body: formBody(Object.fromEntries(new FormData(form))) });
       form.reset();
@@ -307,16 +348,21 @@ function FinesPage({ setNotice }) {
       await load();
     } catch (error) {
       noticeText(setNotice, error.message, "error");
+    } finally {
+      setBusy(false);
     }
   }
 
   async function markPaid(fine) {
+    setBusy(true);
     try {
       await api(`/fines/${fine.id}/paid/`, { method: "POST", body: formBody({}) });
       noticeText(setNotice, "Fine marked as paid.");
       await load();
     } catch (error) {
       noticeText(setNotice, error.message, "error");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -328,11 +374,11 @@ function FinesPage({ setNotice }) {
           <label>Student<select name="member_id" required defaultValue=""><option value="" disabled>Choose a student</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name} · {member.student_id}</option>)}</select></label>
           <label>Amount in rupees<input name="amount" type="number" min="0.01" step="0.01" required /></label>
           <label>Reason<input name="reason" maxLength="200" required placeholder="Damaged cover" /></label>
-          <button className="button primary">Add unpaid fine</button>
+          <button className="button primary" disabled={busy}>{busy ? "Saving…" : "Add unpaid fine"}</button>
         </form>
       </section>
       <section className="panel list-panel"><div className="panel-head"><div><span className="eyebrow">ALL RECORDS</span><h3>Fines and payments</h3></div><span className="pill">{fines.length} entries</span></div>
-        <div className="fine-list">{fines.map((fine) => <article className="fine-row" key={fine.id}><div className="fine-amount">₹{fine.amount}</div><div className="fine-info"><b>{fine.member_name} <small>{fine.student_id}</small></b><span>{fine.reason}</span><small>{fine.fine_type === "overdue" ? "Overdue fine" : "Custom fine"} · {new Date(fine.created_at).toLocaleDateString()}</small></div><span className={`status ${fine.status}`}>{fine.status}</span>{fine.status === "unpaid" && !fine.current && <button className="button light small" onClick={() => markPaid(fine)}>Mark paid</button>}</article>)}{fines.length === 0 && <p className="empty">There are no fines to show.</p>}</div>
+        <div className="fine-list">{fines.map((fine) => <article className="fine-row" key={fine.id}><div className="fine-amount">₹{fine.amount}</div><div className="fine-info"><b>{fine.member_name} <small>{fine.student_id}</small></b><span>{fine.reason}</span><small>{fine.fine_type === "overdue" ? "Overdue fine" : "Custom fine"} · {new Date(fine.created_at).toLocaleDateString()}</small></div><span className={`status ${fine.status}`}>{fine.status}</span>{fine.status === "unpaid" && !fine.current && <button className="button light small" disabled={busy} onClick={() => markPaid(fine)}>Mark paid</button>}</article>)}{loading && <p className="empty">Loading fines…</p>}{!loading && fines.length === 0 && <p className="empty">There are no fines to show.</p>}</div>
       </section>
     </div>
   </>;
@@ -342,16 +388,24 @@ function ReviewsPage({ setNotice }) {
   const [reviews, setReviews] = useState([]);
   const [books, setBooks] = useState([]);
   const [members, setMembers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
   async function load() {
-    const [reviewData, bookData, memberData] = await Promise.all([api("/reviews/"), api("/books/"), api("/members/catalogue/")]);
-    setReviews(reviewData.results);
-    setBooks(bookData.results);
-    setMembers(memberData.results);
+    setLoading(true);
+    try {
+      const [reviewData, bookData, memberData] = await Promise.all([api("/reviews/"), api("/books/"), api("/members/catalogue/")]);
+      setReviews(reviewData.results);
+      setBooks(bookData.results);
+      setMembers(memberData.results);
+    } finally {
+      setLoading(false);
+    }
   }
   useEffect(() => { load().catch((error) => noticeText(setNotice, error.message, "error")); }, []);
   async function submit(event) {
     event.preventDefault();
     const form = event.currentTarget;
+    setBusy(true);
     try {
       await api("/reviews/add/", { method: "POST", body: formBody(Object.fromEntries(new FormData(form))) });
       form.reset();
@@ -359,6 +413,8 @@ function ReviewsPage({ setNotice }) {
       await load();
     } catch (error) {
       noticeText(setNotice, error.message, "error");
+    } finally {
+      setBusy(false);
     }
   }
   return <>
@@ -370,10 +426,10 @@ function ReviewsPage({ setNotice }) {
           <label>Student<select name="member_id" required defaultValue=""><option value="" disabled>Choose a student</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
           <label>Rating<select name="rating" defaultValue="5">{[5, 4, 3, 2, 1].map((rating) => <option key={rating} value={rating}>{rating} / 5</option>)}</select></label>
           <label>Note<textarea name="comment" maxLength="500" rows="4" required /></label>
-          <button className="button primary">Save review</button>
+          <button className="button primary" disabled={busy}>{busy ? "Saving…" : "Save review"}</button>
         </form>
       </section>
-      <section className="panel list-panel"><div className="panel-head"><div><span className="eyebrow">WORDS WORTH KEEPING</span><h3>Community notes</h3></div></div><div className="review-list">{reviews.map((review) => <article className="review-row" key={review.id}><div className="review-rating">{"★".repeat(review.rating)}{"☆".repeat(5 - review.rating)}</div><b>{review.book_title}</b><p>“{review.comment}”</p><small>{review.member_name} · {new Date(review.created_at).toLocaleDateString()}</small></article>)}{reviews.length === 0 && <p className="empty">No notes yet.</p>}</div></section>
+      <section className="panel list-panel"><div className="panel-head"><div><span className="eyebrow">WORDS WORTH KEEPING</span><h3>Community notes</h3></div></div><div className="review-list">{reviews.map((review) => <article className="review-row" key={review.id}><div className="review-rating">{"★".repeat(review.rating)}{"☆".repeat(5 - review.rating)}</div><b>{review.book_title}</b><p>“{review.comment}”</p><small>{review.member_name} · {new Date(review.created_at).toLocaleDateString()}</small></article>)}{loading && <p className="empty">Loading reader notes…</p>}{!loading && reviews.length === 0 && <p className="empty">No notes yet.</p>}</div></section>
     </div>
   </>;
 }
@@ -382,16 +438,23 @@ function StudentPortal({ user, tab, setNotice }) {
   const [books, setBooks] = useState([]);
   const [loans, setLoans] = useState([]);
   const [fines, setFines] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
   const [copyId, setCopyId] = useState("");
   const [copyInfo, setCopyInfo] = useState(null);
   const [scanOpen, setScanOpen] = useState(false);
   const [slip, setSlip] = useState(null);
 
-  async function load() {
-    if (tab === "catalogue") setBooks((await api(`/catalogue/?q=${encodeURIComponent(query)}`)).results);
-    if (tab === "my_loans") setLoans((await api("/student/loans/")).results);
-    if (tab === "my_fines") setFines((await api("/fines/")).results);
+  async function load(searchTerm = query) {
+    setLoading(true);
+    try {
+      if (tab === "catalogue") setBooks((await api(`/catalogue/?q=${encodeURIComponent(searchTerm)}`)).results);
+      if (tab === "my_loans") setLoans((await api("/student/loans/")).results);
+      if (tab === "my_fines") setFines((await api("/fines/")).results);
+    } finally {
+      setLoading(false);
+    }
   }
   useEffect(() => { load().catch((error) => noticeText(setNotice, error.message, "error")); }, [tab]);
 
@@ -408,6 +471,7 @@ function StudentPortal({ user, tab, setNotice }) {
   }
 
   async function issueCopy() {
+    setBusy(true);
     try {
       const result = await api("/student/issue/", { method: "POST", body: formBody({ copy_id: copyId }) });
       setSlip(result.loan);
@@ -415,32 +479,34 @@ function StudentPortal({ user, tab, setNotice }) {
       noticeText(setNotice, "Book issued. Your issue slip is ready.");
     } catch (error) {
       noticeText(setNotice, error.message, "error");
+    } finally {
+      setBusy(false);
     }
   }
 
   async function search(event) {
     event.preventDefault();
-    try { await load(); } catch (error) { noticeText(setNotice, error.message, "error"); }
+    try { await load(query); } catch (error) { noticeText(setNotice, error.message, "error"); }
   }
 
   if (tab === "catalogue") return <>
     <PageTitle eyebrow="STUDENT PORTAL / YOUR CAMPUS LIBRARY" title={`Hello, ${user.name.split(" ")[0]}.`} note="Browse the collection, then scan the QR on the exact copy you want." />
-    <section className="panel"><form className="search-row" onSubmit={search}><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search books or authors" /><button className="button light">Search</button></form>
-      <div className="catalogue-grid">{books.map((book) => <article className="catalogue-card" key={book.id}><div className="catalogue-cover">▤</div><span className="eyebrow">{book.category}</span><h3>{book.title}</h3><p>{book.author}</p><div className="catalogue-footer"><span>{book.available} available</span><small>Shelf {book.shelf || "Unassigned"}</small></div></article>)}{books.length === 0 && <p className="empty">No books match that search.</p>}</div>
+    <section className="panel"><form className="search-row" onSubmit={search}><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search books or authors" /><button className="button light" disabled={loading}>{loading ? "Loading…" : "Search"}</button></form>
+      <div className="catalogue-grid">{books.map((book) => <article className="catalogue-card" key={book.id}><div className="catalogue-cover">▤</div><span className="eyebrow">{book.category}</span><h3>{book.title}</h3><p>{book.author}</p><div className="catalogue-footer"><span>{book.available} available</span><small>Shelf {book.shelf || "Unassigned"}</small></div></article>)}{loading && <p className="empty">Loading books…</p>}{!loading && books.length === 0 && <p className="empty">No books match that search.</p>}</div>
     </section>
-    <section className="panel scan-student"><div><span className="eyebrow">READY TO BORROW</span><h3>Scan your copy</h3><p>Sign in first, scan the QR label, and confirm the issue. You can borrow up to five books.</p><button className="button primary" onClick={() => setScanOpen((open) => !open)}>{scanOpen ? "Close camera" : "Open QR scanner"}</button></div><div className="scan-side">{copyInfo ? <><b>{copyInfo.book_title}</b><span>{copyInfo.copy_id}</span><span className={`status ${copyInfo.status}`}>{copyInfo.status}</span>{copyInfo.status === "available" && <button className="button dark" onClick={issueCopy}>Confirm checkout</button>}</> : <span className="scan-symbol">⌗</span>}</div></section>
+    <section className="panel scan-student"><div><span className="eyebrow">READY TO BORROW</span><h3>Scan your copy</h3><p>Sign in first, scan the QR label, and confirm the issue. You can borrow up to five books.</p><button className="button primary" disabled={busy} onClick={() => setScanOpen((open) => !open)}>{scanOpen ? "Close camera" : "Open QR scanner"}</button></div><div className="scan-side">{copyInfo ? <><b>{copyInfo.book_title}</b><span>{copyInfo.copy_id}</span><span className={`status ${copyInfo.status}`}>{copyInfo.status}</span>{copyInfo.status === "available" && <button className="button dark" disabled={busy} onClick={issueCopy}>{busy ? "Checking out…" : "Confirm checkout"}</button>}</> : <span className="scan-symbol">⌗</span>}</div></section>
     <Scanner open={scanOpen} onScan={scanned} onError={(message) => noticeText(setNotice, message, "error")} />
     {slip && <section className="issue-slip"><div><span className="eyebrow">ISSUE SLIP</span><h3>{slip.book_title}</h3><p>Copy {slip.copy_id} · return by {new Date(slip.due_at).toLocaleDateString()}</p><code>{slip.issue_code}</code></div><button className="button light" onClick={() => window.print()}>Print slip</button></section>}
   </>;
 
   if (tab === "my_loans") return <>
     <PageTitle eyebrow="STUDENT PORTAL / CIRCULATION" title="My loans" note="Your active issues and return dates." />
-    <section className="panel"><div className="table-scroll"><table><thead><tr><th>Book</th><th>Copy ID</th><th>Issue ID</th><th>Due date</th><th>Fine today</th><th>Status</th></tr></thead><tbody>{loans.map((loan) => <tr key={loan.id}><td>{loan.book_title}</td><td><code>{loan.copy_id}</code></td><td><code>{loan.issue_code}</code></td><td>{new Date(loan.due_at).toLocaleDateString()}</td><td>{loan.current_fine === "0" ? "—" : `₹${loan.current_fine}`}</td><td><span className={`status ${loan.status}`}>{loan.status}</span></td></tr>)}</tbody></table></div>{loans.length === 0 && <p className="empty">You do not have any loans yet.</p>}</section>
+    <section className="panel"><div className="table-scroll"><table><thead><tr><th>Book</th><th>Copy ID</th><th>Issue ID</th><th>Due date</th><th>Fine today</th><th>Status</th></tr></thead><tbody>{loans.map((loan) => <tr key={loan.id}><td>{loan.book_title}</td><td><code>{loan.copy_id}</code></td><td><code>{loan.issue_code}</code></td><td>{new Date(loan.due_at).toLocaleDateString()}</td><td>{loan.current_fine === "0" ? "—" : `₹${loan.current_fine}`}</td><td><span className={`status ${loan.status}`}>{loan.status}</span></td></tr>)}</tbody></table></div>{loading && <p className="empty">Loading your loans…</p>}{!loading && loans.length === 0 && <p className="empty">You do not have any loans yet.</p>}</section>
   </>;
 
   return <>
     <PageTitle eyebrow="STUDENT PORTAL / ACCOUNT" title="My fines" note="The current overdue amount starts on the calendar day after your due date." />
-    <section className="panel"><div className="fine-list">{fines.map((fine) => <article className="fine-row" key={fine.id}><div className="fine-amount">₹{fine.amount}</div><div className="fine-info"><b>{fine.reason}</b><span>{fine.fine_type === "overdue" ? "Overdue fine" : "Custom fine"}</span><small>{new Date(fine.created_at).toLocaleDateString()}</small></div><span className={`status ${fine.status}`}>{fine.status}</span></article>)}{fines.length === 0 && <p className="empty">You do not have any fines.</p>}</div></section>
+    <section className="panel"><div className="fine-list">{fines.map((fine) => <article className="fine-row" key={fine.id}><div className="fine-amount">₹{fine.amount}</div><div className="fine-info"><b>{fine.reason}</b><span>{fine.fine_type === "overdue" ? "Overdue fine" : "Custom fine"}</span><small>{new Date(fine.created_at).toLocaleDateString()}</small></div><span className={`status ${fine.status}`}>{fine.status}</span></article>)}{loading && <p className="empty">Loading your fines…</p>}{!loading && fines.length === 0 && <p className="empty">You do not have any fines.</p>}</div></section>
   </>;
 }
 
