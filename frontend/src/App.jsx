@@ -579,14 +579,19 @@ function StudentPortal({ user, tab, setNotice, selectedBook, onOpenBook, onBackT
     try { await load(query); } catch (error) { noticeText(setNotice, error.message, "error"); }
   }
 
+  function openIssueSlip(loan) {
+    setSlip(loan);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
   if (tab === "catalogue") return <>
     <section className="student-welcome"><img src="/assets/library-reading-room.jpg" alt="A bright corner of the campus library" /><div><span className="eyebrow">YOUR CAMPUS LIBRARY</span><h2>Hello, {user.name.split(" ")[0]}.</h2><p>Find a title, then scan the QR on the exact copy you want to borrow.</p></div></section>
+    {slip && <IssueSlip loan={slip} onClose={() => setSlip(null)} />}
     <section className="panel"><div className="panel-head"><div><span className="eyebrow">COLLECTION</span><h3>Search the shelves</h3></div></div><form className="search-row" onSubmit={search}><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search books or authors" /><button className="button light" disabled={loading}>{loading ? "Loading…" : "Search"}</button></form>
       <div className="catalogue-grid book-catalogue-grid">{books.map((book) => <button type="button" className="catalogue-card book-tile" key={book.id} onClick={() => onOpenBook(book)}><img src="/assets/library-reading-room.jpg" alt="" /><span className="eyebrow">{book.category}</span><h3>{book.title}</h3><p>{book.author}</p><div className="catalogue-footer"><span>{book.available} copies free</span><small>Shelf {book.shelf || "Unassigned"}</small></div><span className="book-tile-link">Open title →</span></button>)}{loading && <p className="empty">Loading books…</p>}{!loading && books.length === 0 && <p className="empty">No books match that search.</p>}</div>
     </section>
     <section className="panel scan-student"><div><span className="eyebrow">READY TO BORROW</span><h3>Scan your copy</h3><p>Sign in first, scan the QR label, and confirm the issue. You can borrow up to five books.</p><button className="button primary" disabled={busy} onClick={() => setScanOpen((open) => !open)}>{scanOpen ? "Close camera" : "Open QR scanner"}</button></div><div className="scan-side">{copyInfo ? <><b>{copyInfo.book_title}</b><span>{copyInfo.copy_id}</span><span className={`status ${copyInfo.status}`}>{copyInfo.status}</span>{copyInfo.status === "available" && <button className="button dark" disabled={busy} onClick={issueCopy}>{busy ? "Checking out…" : "Confirm checkout"}</button>}</> : <span className="scan-symbol">⌗</span>}</div></section>
     <Scanner open={scanOpen} onScan={scanned} onError={(message) => noticeText(setNotice, message, "error")} />
-    {slip && <IssueSlip loan={slip} />}
   </>;
 
   if (tab === "student_book") return <>
@@ -597,8 +602,8 @@ function StudentPortal({ user, tab, setNotice, selectedBook, onOpenBook, onBackT
 
   if (tab === "my_loans") return <>
     <PageTitle eyebrow="STUDENT PORTAL / CIRCULATION" title="My loans" note="Your active issues and return dates." />
-    <section className="panel"><div className="table-scroll"><table><thead><tr><th>Book</th><th>Copy ID</th><th>Issue ID</th><th>Due date</th><th>Fine today</th><th>Status</th><th>Slip / return QR</th></tr></thead><tbody>{loans.map((loan) => <tr key={loan.id}><td><b>{loan.book_title}</b><small>{loan.book_author}</small></td><td><code>{loan.copy_id}</code></td><td><code>{loan.issue_code}</code></td><td>{new Date(loan.due_at).toLocaleDateString()}</td><td>{loan.current_fine === "0" ? "—" : `₹${loan.current_fine}`}</td><td><span className={`status ${loan.status}`}>{loan.status}</span></td><td><button className="button light small" onClick={() => setSlip(loan)}>{loan.status === "borrowed" ? "Open return QR & slip" : "Open issue slip"}</button></td></tr>)}</tbody></table></div>{loading && <p className="empty">Loading your loans…</p>}{!loading && loans.length === 0 && <p className="empty">You do not have any loans yet.</p>}</section>
     {slip && <IssueSlip loan={slip} onClose={() => setSlip(null)} />}
+    <section className="panel"><div className="table-scroll"><table><thead><tr><th>Book</th><th>Copy ID</th><th>Issue ID</th><th>Due date</th><th>Fine today</th><th>Status</th><th>Slip / return QR</th></tr></thead><tbody>{loans.map((loan) => <tr key={loan.id}><td><b>{loan.book_title}</b><small>{loan.book_author}</small></td><td><code>{loan.copy_id}</code></td><td><code>{loan.issue_code}</code></td><td>{new Date(loan.due_at).toLocaleDateString()}</td><td>{loan.current_fine === "0" ? "—" : `₹${loan.current_fine}`}</td><td><span className={`status ${loan.status}`}>{loan.status}</span></td><td><button className="button light small" onClick={() => openIssueSlip(loan)}>{loan.status === "borrowed" ? "Open return QR & slip" : "Open issue slip"}</button></td></tr>)}</tbody></table></div>{loading && <p className="empty">Loading your loans…</p>}{!loading && loans.length === 0 && <p className="empty">You do not have any loans yet.</p>}</section>
   </>;
 
   return <>
@@ -693,4 +698,3 @@ export default function App() {
     </main>
   </div>;
 }
-
