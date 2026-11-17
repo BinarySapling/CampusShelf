@@ -45,4 +45,3 @@ class Migration(migrations.Migration):
     operations = [
         migrations.RunPython(allow_null_references, migrations.RunPython.noop),
     ]
-

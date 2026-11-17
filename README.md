@@ -16,6 +16,7 @@ CampusShelf is a campus library app. React and Vite provide the browser interfac
 - Automatic overdue fine of ₹20 for each calendar day after the due date
 - Custom student fines with unpaid and paid status
 - Django session login and CSRF protection for React requests
+- Student and librarian password changes after verifying the current password; librarians can also reset student portal passwords
 
 ## Run locally
 

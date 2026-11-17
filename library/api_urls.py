@@ -10,6 +10,7 @@ urlpatterns = [
     path("auth/login/", api.login_user, name="api_login"),
     path("auth/setup/", api.setup_librarian, name="api_setup_librarian"),
     path("auth/logout/", api.logout_user, name="api_logout"),
+    path("auth/password/", api.change_password, name="api_change_password"),
     path("signup/", api.submit_signup, name="api_signup"),
     path("catalogue/", api.catalogue, name="api_catalogue"),
     path("dashboard/", api.dashboard_data, name="api_dashboard"),
