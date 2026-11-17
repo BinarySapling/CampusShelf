@@ -564,7 +564,7 @@ function StudentPortal({ user, tab, setNotice, selectedBook, onOpenBook, onBackT
     setBusy(true);
     try {
       const result = await api("/student/issue/", { method: "POST", body: formBody({ copy_id: copyId }) });
-      setSlip(result.loan);
+      openIssueSlip(result.loan);
       setCopyInfo({ ...copyInfo, status: "borrowed" });
       noticeText(setNotice, "Book issued. Your issue slip is ready.");
     } catch (error) {
