@@ -9,7 +9,7 @@ CampusShelf is a campus library app. React and Vite provide the browser interfac
 ## Features
 
 - Librarian dashboard, catalogue, issue register, reviews, and Django Admin
-- Unique Copy IDs with printable QR labels for every physical copy
+- Unique Copy IDs with printable QR labels for every physical copy, individually or all at once
 - Student signup requests that stay pending until a librarian approves them
 - Student self-checkout by scanning an available copy QR after signing in
 - Librarian QR returns, with an issue slip and 14-day loan period
@@ -113,3 +113,4 @@ npm --prefix frontend run build
 Run Django tests with a MongoDB test database available. The test runner creates and removes a separate database with the `test_` prefix. It does not write test records to the configured `campusshelf` database.
 
 For MongoDB connection and feature details, see the [official Django MongoDB Backend documentation](https://www.mongodb.com/docs/languages/python/django-mongodb/current/).
+

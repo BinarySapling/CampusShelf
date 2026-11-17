@@ -137,7 +137,7 @@ function BooksPage({ setNotice }) {
       const result = await api("/books/", { method: "POST", body: formBody(values) });
       await loadBooks(search);
       form.reset();
-      setCopies(await api(`/books/${result.book.id}/copies/`));
+      setCopies({ title: result.book.title, ...(await api(`/books/${result.book.id}/copies/`)) });
       noticeText(setNotice, "Book saved. Print its copy QR labels below.");
     } catch (error) {
       noticeText(setNotice, error.message, "error");
@@ -149,6 +149,15 @@ function BooksPage({ setNotice }) {
   async function showCopies(book) {
     try {
       setCopies({ title: book.title, ...(await api(`/books/${book.id}/copies/`)) });
+    } catch (error) {
+      noticeText(setNotice, error.message, "error");
+    }
+  }
+
+  async function showAllCopies() {
+    try {
+      const result = await api("/books/copies/");
+      setCopies({ title: "All book copies", results: result.results });
     } catch (error) {
       noticeText(setNotice, error.message, "error");
     }
@@ -169,12 +178,12 @@ function BooksPage({ setNotice }) {
         </form>
       </section>
       <section className="panel list-panel">
-        <div className="panel-head"><div><span className="eyebrow">IN THE LIBRARY</span><h3>Collection</h3></div><span className="pill">{books.length} titles</span></div>
+        <div className="panel-head"><div><span className="eyebrow">IN THE LIBRARY</span><h3>Collection</h3></div><button className="button light small" type="button" onClick={showAllCopies}>Show all QR labels</button><span className="pill">{books.length} titles</span></div>
         <form className="search-row" onSubmit={(event) => { event.preventDefault(); loadBooks(search); }}><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a title or author" /><button className="button light">Search</button></form>
         <div className="book-list">{books.map((book) => <article className="book-row" key={book.id}><div className="book-cover">▤</div><div className="book-copy"><b>{book.title}</b><span>{book.author} · {book.category}</span><small>{book.available} of {book.total} copies available · Shelf {book.shelf || "Unassigned"}</small></div><button className="button light small" onClick={() => showCopies(book)}>Copy QR labels</button></article>)}{books.length === 0 && <p className="empty">No titles found. Add the first one from the form.</p>}</div>
       </section>
     </div>
-    {copies && <section className="panel qr-panel"><div className="panel-head"><div><span className="eyebrow">PRINTABLE LABELS</span><h3>{copies.title || "New book copies"}</h3></div><button className="button light" onClick={() => window.print()}>Print labels</button></div><div className="qr-grid">{copies.results.map((copy) => <article className="qr-card" key={copy.id}><QRCodeSVG value={copy.copy_id} size={120} /><b>{copy.copy_id}</b><span>{copy.status === "available" ? "Available" : "On loan"} · {copy.shelf}</span></article>)}</div></section>}
+    {copies && <section className="panel qr-panel"><div className="panel-head"><div><span className="eyebrow">PRINTABLE LABELS</span><h3>{copies.title || "New book copies"}</h3></div><button className="button light" onClick={() => window.print()}>Print labels</button></div><div className="qr-grid">{copies.results.map((copy) => <article className="qr-card" key={copy.id}><QRCodeSVG value={copy.copy_id} size={120} />{copies.title === "All book copies" && <span>{copy.book_title}</span>}<b>{copy.copy_id}</b><span>{copy.status === "available" ? "Available" : "On loan"} · {copy.shelf}</span></article>)}</div>{copies.results.length === 0 && <p className="empty">There are no physical copies to label yet.</p>}</section>}
   </>;
 }
 
@@ -515,3 +524,4 @@ export default function App() {
     </main>
   </div>;
 }
+

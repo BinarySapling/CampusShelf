@@ -235,10 +235,11 @@ code { padding: 3px 5px; border-radius: 5px; background: #f6f4ff; color: #5d50c1
 }
 @media print {
   body { background: #fff; }
-  .sidebar, .topbar, .page-title, .panel-head .button, .notice, .toast, .sidebar-help { display: none !important; }
+  .sidebar, .topbar, .page-title, .content-grid, .panel-head .button, .notice, .toast, .sidebar-help { display: none !important; }
   .main-area { width: 100%; margin: 0; padding: 0; }
   .qr-panel { border: 0; }
   .qr-grid { grid-template-columns: repeat(3, 1fr); }
   .qr-card { break-inside: avoid; }
   .issue-slip { break-inside: avoid; }
 }
+

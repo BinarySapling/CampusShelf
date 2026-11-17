@@ -325,6 +325,42 @@ class CampusShelfFeatureApiTests(TestCase):
         self.assertEqual(login.status_code, 200)
         self.assertEqual(login.json()["user"]["role"], "student")
 
+    def test_librarian_can_get_qr_details_for_every_copy(self):
+        other_book = Book.objects.create(
+            title="Second QR Book",
+            author="B. Writer",
+            category="History",
+            copies=1,
+            total_copies=1,
+            available=True,
+            shelf="H-02",
+        )
+        other_copy = BookCopy.objects.create(
+            book=other_book,
+            copy_id=copy_code_for(other_book.id),
+            book_title=other_book.title,
+            shelf=other_book.shelf,
+        )
+
+        response = self.staff_client.get("/api/books/copies/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertCountEqual(
+            [item["copy_id"] for item in response.json()["results"]],
+            [self.copy.copy_id, other_copy.copy_id],
+        )
+        other_row = next(item for item in response.json()["results"] if item["copy_id"] == other_copy.copy_id)
+        self.assertEqual(other_row["book_title"], "Second QR Book")
+
+    def test_students_cannot_get_librarian_qr_label_list(self):
+        student = User.objects.create_user(username="student-qr-list", password="StrongPass123!")
+        student_client = Client()
+        student_client.force_login(student)
+
+        response = student_client.get("/api/books/copies/")
+
+        self.assertEqual(response.status_code, 403)
+
     def test_librarian_cannot_issue_a_sixth_active_book(self):
         member = Member.objects.create(
             student_id="STU-LIMIT-01",
@@ -503,3 +539,4 @@ class CampusShelfFeatureApiTests(TestCase):
 
         allowed = csrf_client.post("/api/signup/", values, HTTP_X_CSRFTOKEN=token)
         self.assertEqual(allowed.status_code, 201)
+

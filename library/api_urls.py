@@ -14,6 +14,7 @@ urlpatterns = [
     path("catalogue/", api.catalogue, name="api_catalogue"),
     path("dashboard/", api.dashboard_data, name="api_dashboard"),
     path("books/", api.books_api, name="api_books"),
+    path("books/copies/", api.all_copies_list, name="api_all_book_copies"),
     path("books/<str:book_id>/copies/", api.copies_list, name="api_book_copies"),
     path("copies/<str:copy_id>/", api.scan_copy, name="api_scan_copy"),
     path("copies/<str:copy_id>/lookup/", api.copy_lookup, name="api_copy_lookup"),
@@ -32,3 +33,4 @@ urlpatterns = [
     path("reviews/add/", api.add_review, name="api_add_review"),
     path("health/", views.health, name="api_health"),
 ]
+

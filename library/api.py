@@ -414,6 +414,19 @@ def copies_list(request, book_id):
 
 @librarian_api
 @require_GET
+def all_copies_list(request):
+    copies = BookCopy.objects.select_related("book").order_by("book__title", "copy_id")
+    return JsonResponse({"results": [{
+        "id": str(copy.pk),
+        "copy_id": copy.copy_id,
+        "status": copy.status,
+        "shelf": copy.shelf,
+        "book_title": copy.book.title,
+    } for copy in copies]})
+
+
+@librarian_api
+@require_GET
 def copy_lookup(request, copy_id):
     copy = BookCopy.objects.filter(copy_id=copy_id.strip().upper()).select_related("book").first()
     if not copy:
@@ -652,3 +665,4 @@ def members_catalogue(request):
         "name": member.name,
         "email": member.email,
     } for member in Member.objects.filter(approval_status=Member.APPROVED)[:200]]})
+
