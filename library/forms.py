@@ -122,6 +122,12 @@ class ReviewForm(forms.Form):
     comment = forms.CharField(max_length=500)
 
 
+class StudentReviewForm(forms.Form):
+    book_id = forms.CharField(max_length=32)
+    rating = forms.IntegerField(min_value=1, max_value=5)
+    comment = forms.CharField(max_length=500, required=False)
+
+
 class IssueIdForm(forms.Form):
     issue_code = forms.CharField(max_length=40)
 

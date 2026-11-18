@@ -168,6 +168,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .book-tile .eyebrow { margin-bottom: 6px; color: #6c8171; font-size: 8px; }
 .book-tile h3 { margin: 0 0 5px; font-size: 13px; font-weight: 700; line-height: 1.4; }
 .book-tile p { margin: 0; color: var(--muted); font-size: 10px; }
+.book-rating { display: inline-flex; align-items: center; gap: 6px; margin: 8px 0; }
+.book-rating-stars { display: inline-flex; gap: 1px; color: #d9d7ca; font-size: 12px; letter-spacing: 0; }
+.book-rating-stars .is-rated { color: #b58a46; }
+.book-rating small { color: #7f8173; font-size: 8px; }
 .catalogue-footer { display: flex; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 14px; color: #467554; font-size: 9px; font-weight: 700; }
 .catalogue-footer small { color: #8b938b; font-size: 8px; font-weight: 500; }
 .book-tile-link { display: flex; justify-content: space-between; margin-top: 12px; padding-top: 10px; border-top: 1px solid #ebebe4; color: #3b674e; font-size: 9px; font-weight: 700; }
@@ -189,6 +193,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .book-detail-hero p { max-width: 600px; margin: 0 0 18px; color: #707c73; font-size: 11px; line-height: 1.65; }
 .detail-stats { display: flex; flex-wrap: wrap; gap: 10px 22px; color: #737f74; font-size: 9px; }
 .detail-stats b { color: var(--ink); font-size: 12px; }
+.book-detail-hero .book-rating { display: flex; margin: -3px 0 15px; }
 .detail-next-step h3 { margin: 0 0 7px; font: 400 26px var(--display); }
 .detail-next-step p { max-width: 570px; margin-bottom: 16px; color: var(--muted); font-size: 11px; line-height: 1.6; }
 
@@ -218,6 +223,29 @@ code { padding: 4px 6px; border: 1px solid #e6e8df; border-radius: 5px; backgrou
 .review-row b { display: block; margin: 5px 0; font-size: 11px; }
 .review-row p { margin: 6px 0; color: #66736a; font: italic 400 17px/1.4 var(--display); }
 .review-row small { color: #929a92; font-size: 8px; }
+.student-reviews-panel { margin-top: 18px; }
+.reader-rating-overview { display: flex; align-items: center; gap: 14px; padding: 15px 0; border-bottom: 1px solid #eeeee8; }
+.reader-rating-overview > strong { color: var(--ink); font: 400 42px/.95 var(--display); }
+.reader-rating-overview > div { display: grid; gap: 2px; }
+.reader-rating-overview .book-rating { margin: 0; }
+.reader-rating-overview > div > small { color: var(--muted); font-size: 8px; }
+.student-review-form { display: grid; gap: 12px; margin-top: 15px; padding: 15px; border: 1px solid #e8e8df; border-radius: 10px; background: #fbfbf7; }
+.student-review-form label { display: grid; gap: 6px; color: var(--ink); font-size: 9px; font-weight: 700; }
+.student-review-form label > span { color: var(--muted); font-size: 8px; font-weight: 400; }
+.student-review-form textarea { width: 100%; min-height: 72px; padding: 10px; border: 1px solid #e4e5db; border-radius: 7px; background: #fff; color: var(--ink); font: inherit; font-size: 10px; resize: vertical; }
+.rating-picker { width: fit-content; margin: 0; padding: 0; border: 0; }
+.rating-picker legend { margin-bottom: 5px; color: var(--ink); font-size: 9px; font-weight: 700; }
+.rating-picker > div { display: flex; gap: 2px; }
+.rating-picker button { padding: 0 3px; border: 0; background: transparent; color: #d8d5c9; font-size: 25px; line-height: 1.2; }
+.rating-picker button.selected { color: #b58a46; }
+.rating-picker button:focus-visible { outline: 2px solid #739678; outline-offset: 2px; }
+.student-review-submit { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.student-review-submit small { color: var(--muted); font-size: 8px; line-height: 1.5; }
+.public-review-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 10px; margin-top: 15px; }
+.public-review-card { min-width: 0; padding: 13px; border: 1px solid #ecebe3; border-radius: 9px; background: #fffefa; }
+.public-review-stars { color: #b58a46; font-size: 11px; letter-spacing: 1px; }
+.public-review-card p { margin: 8px 0; color: #606d62; font: italic 400 15px/1.4 var(--display); overflow-wrap: anywhere; }
+.public-review-card small { color: #929a92; font-size: 8px; }
 .review-rating { color: #ba8c4e; font-size: 12px; letter-spacing: 1px; }
 
 /* Circulation and QR flows */
@@ -384,6 +412,7 @@ code { padding: 4px 6px; border: 1px solid #e6e8df; border-radius: 5px; backgrou
   .scan-result-card { grid-template-columns: 31px minmax(0, 1fr); }
   .scan-result-card > .status { grid-column: 2; justify-self: start; }
   .student-fine-summary { align-items: flex-start; padding: 15px; }
+  .student-review-submit { align-items: stretch; flex-direction: column; }
 }
 @media (max-width: 380px) {
   .main-area { padding-inline: 11px; }

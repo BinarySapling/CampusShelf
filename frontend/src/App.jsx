@@ -31,6 +31,15 @@ function StatCard({ label, value, note }) {
   return <article className="stat-card"><span>{label}</span><strong>{value ?? "—"}</strong><small>{note}</small></article>;
 }
 
+function BookRating({ rating = 0, count = 0 }) {
+  const average = Number(rating) || 0;
+  const label = count ? `${average.toFixed(1)} out of 5 from ${count} reader rating${count === 1 ? "" : "s"}` : "No reader ratings yet";
+  return <span className="book-rating" aria-label={label}>
+    <span className="book-rating-stars" aria-hidden="true">{[1, 2, 3, 4, 5].map((star) => <span key={star} className={star <= Math.round(average) ? "is-rated" : ""}>★</span>)}</span>
+    <small>{count ? `${average.toFixed(1)} · ${count} ${count === 1 ? "rating" : "ratings"}` : "No ratings yet"}</small>
+  </span>;
+}
+
 function PageTitle({ eyebrow, title, note, action }) {
   return <div className="page-title"><div><span className="eyebrow">{eyebrow}</span><h2>{title}</h2>{note && <p>{note}</p>}</div>{action}</div>;
 }
@@ -184,7 +193,7 @@ function BooksPage({ setNotice, onAddBook, onOpenBook }) {
       <p className="route-hint">{loading ? "Loading the collection…" : `${books.length} title${books.length === 1 ? "" : "s"} found · Select a book to open its copy labels.`}</p>
       <div className="catalogue-grid book-catalogue-grid">{books.map((book) => <button type="button" className="catalogue-card book-tile" key={book.id} onClick={() => onOpenBook(book)}>
         <BookCover book={book} />
-        <span className="eyebrow">{book.category}</span><h3>{book.title}</h3><p>{book.author}</p>
+        <span className="eyebrow">{book.category}</span><h3>{book.title}</h3><p>{book.author}</p><BookRating rating={book.average_rating} count={book.rating_count} />
         <div className="catalogue-footer"><span>{book.available} / {book.total} copies free</span><small>Shelf {book.shelf || "Unassigned"}</small></div>
         <span className="book-tile-link">Open copies →</span>
       </button>)}{loading && <p className="empty">Loading titles…</p>}{!loading && books.length === 0 && <p className="empty">No titles found. Try another search or add a new book.</p>}</div>
@@ -536,6 +545,70 @@ function ReviewsPage({ setNotice }) {
   </>;
 }
 
+function StudentBookReviews({ book, setNotice, onRatingChange }) {
+  const [reviews, setReviews] = useState([]);
+  const [average, setAverage] = useState(0);
+  const [ratingCount, setRatingCount] = useState(0);
+  const [rating, setRating] = useState(0);
+  const [comment, setComment] = useState("");
+  const [hasReview, setHasReview] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const data = await api(`/books/${book.id}/reviews/`);
+      setReviews(data.results);
+      setAverage(data.average_rating);
+      setRatingCount(data.rating_count);
+      onRatingChange?.({ average_rating: data.average_rating, rating_count: data.rating_count });
+      setHasReview(Boolean(data.my_review));
+      setRating(data.my_review?.rating || 0);
+      setComment(data.my_review?.comment || "");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { load().catch((error) => noticeText(setNotice, error.message, "error")); }, [book.id]);
+
+  async function submit(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    setBusy(true);
+    try {
+      const result = await api("/student/reviews/", {
+        method: "POST",
+        body: formBody({ book_id: book.id, rating: String(rating), comment }),
+      });
+      noticeText(setNotice, result.message);
+      await load();
+    } catch (error) {
+      noticeText(setNotice, error.message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <section className="panel student-reviews-panel">
+    <div className="panel-head"><div><span className="eyebrow">PUBLIC READER RATINGS</span><h3>What readers think</h3></div><button className="button light small" disabled={loading} onClick={() => load().catch((error) => noticeText(setNotice, error.message, "error"))}>{loading ? "Loading…" : "Refresh"}</button></div>
+    <div className="reader-rating-overview"><strong>{ratingCount ? average.toFixed(1) : "—"}</strong><div><BookRating rating={average} count={ratingCount} /><small>{ratingCount ? `Based on ${ratingCount} student rating${ratingCount === 1 ? "" : "s"}` : "No one has rated this book yet."}</small></div></div>
+    <form className="student-review-form" onSubmit={submit}>
+      <fieldset className="rating-picker" disabled={busy || loading}>
+        <legend>{hasReview ? "Update your rating" : "Your rating"}</legend>
+        <div>{[1, 2, 3, 4, 5].map((star) => <button key={star} type="button" className={star <= rating ? "selected" : ""} aria-label={`Rate ${star} out of 5 stars`} aria-pressed={rating === star} onClick={() => setRating(star)}>★</button>)}</div>
+      </fieldset>
+      <label>Note <span>(optional, up to 500 characters)</span><textarea value={comment} onChange={(event) => setComment(event.target.value)} maxLength={500} rows={3} placeholder="Share what you liked or who you would recommend it to." disabled={busy || loading} /></label>
+      <div className="student-review-submit"><small>Your rating and note will be visible to readers in the catalogue.</small><button className="button primary" disabled={busy || loading || rating < 1}>{busy ? "Publishing…" : hasReview ? "Update public rating" : "Publish rating"}</button></div>
+    </form>
+    <div className="public-review-list" aria-live="polite">
+      {reviews.map((review) => <article className="public-review-card" key={review.id}><span className="public-review-stars" aria-label={`${review.rating} out of 5 stars`}>{"★".repeat(review.rating)}{"☆".repeat(5 - review.rating)}</span><p>{review.comment || "Rated without a written note."}</p><small>{review.member_name} · {new Date(review.created_at).toLocaleDateString()}</small></article>)}
+      {loading && <p className="empty">Loading reader ratings…</p>}{!loading && reviews.length === 0 && <p className="empty">Be the first reader to rate this title.</p>}
+    </div>
+  </section>;
+}
+
 function IssueSlip({ loan, onClose }) {
   return <section className="issue-slip slip-full">
     <div className="slip-details">
@@ -559,7 +632,7 @@ function IssueSlip({ loan, onClose }) {
   </section>;
 }
 
-function StudentPortal({ user, tab, setNotice, selectedBook, onOpenBook, onBackToBooks }) {
+function StudentPortal({ user, tab, setNotice, selectedBook, onOpenBook, onBackToBooks, onBookRatingChange }) {
   const [books, setBooks] = useState([]);
   const [loans, setLoans] = useState([]);
   const [fines, setFines] = useState([]);
@@ -623,7 +696,7 @@ function StudentPortal({ user, tab, setNotice, selectedBook, onOpenBook, onBackT
     <section className="student-welcome"><div><span className="eyebrow">YOUR CAMPUS LIBRARY</span><h2>Hello, {user.name.split(" ")[0]}.</h2><p>Find a title that interests you, then check out the exact copy from its QR label.</p></div><div className="welcome-mark" aria-hidden="true"><span>YOUR NEXT</span><b>read</b><span>STARTS HERE</span></div></section>
     {slip && <IssueSlip loan={slip} onClose={() => setSlip(null)} />}
     <section className="panel"><div className="panel-head"><div><span className="eyebrow">COLLECTION</span><h3>Search the shelves</h3></div></div><form className="search-row" onSubmit={search}><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search books or authors" /><button className="button light" disabled={loading}>{loading ? "Loading…" : "Search"}</button></form>
-      <div className="catalogue-grid book-catalogue-grid">{books.map((book) => <button type="button" className="catalogue-card book-tile" key={book.id} onClick={() => onOpenBook(book)}><BookCover book={book} /><span className="eyebrow">{book.category}</span><h3>{book.title}</h3><p>{book.author}</p><div className="catalogue-footer"><span>{book.available} copies free</span><small>Shelf {book.shelf || "Unassigned"}</small></div><span className="book-tile-link">View title <span aria-hidden="true">↗</span></span></button>)}{loading && <p className="empty">Loading books…</p>}{!loading && books.length === 0 && <p className="empty">No books match that search.</p>}</div>
+      <div className="catalogue-grid book-catalogue-grid">{books.map((book) => <button type="button" className="catalogue-card book-tile" key={book.id} onClick={() => onOpenBook(book)}><BookCover book={book} /><span className="eyebrow">{book.category}</span><h3>{book.title}</h3><p>{book.author}</p><BookRating rating={book.average_rating} count={book.rating_count} /><div className="catalogue-footer"><span>{book.available} copies free</span><small>Shelf {book.shelf || "Unassigned"}</small></div><span className="book-tile-link">View title <span aria-hidden="true">↗</span></span></button>)}{loading && <p className="empty">Loading books…</p>}{!loading && books.length === 0 && <p className="empty">No books match that search.</p>}</div>
     </section>
     <section className="panel scan-student"><div><span className="eyebrow">READY TO BORROW</span><h3>Scan your copy</h3><p>Sign in first, scan the QR label, and confirm the issue. You can borrow up to five books.</p><button className="button primary" disabled={busy} onClick={() => setScanOpen((open) => !open)}>{scanOpen ? "Close camera" : "Open QR scanner"}</button></div><div className="scan-side">{copyInfo ? <><b>{copyInfo.book_title}</b><span>{copyInfo.copy_id}</span><span className={`status ${copyInfo.status}`}>{copyInfo.status}</span>{copyInfo.status === "available" && <button className="button dark" disabled={busy} onClick={issueCopy}>{busy ? "Checking out…" : "Confirm checkout"}</button>}</> : <span className="scan-symbol">⌗</span>}</div></section>
     <Scanner open={scanOpen} onScan={scanned} onError={(message) => noticeText(setNotice, message, "error")} />
@@ -631,8 +704,9 @@ function StudentPortal({ user, tab, setNotice, selectedBook, onOpenBook, onBackT
 
   if (tab === "student_book") return <>
     <PageTitle eyebrow="STUDENT CATALOGUE / TITLE DETAILS" title={selectedBook.title} note={`${selectedBook.author} · ${selectedBook.category}`} action={<button className="button light" onClick={onBackToBooks}>← Back to books</button>} />
-    <section className="book-detail-hero"><div className="detail-cover-wrap"><BookCover book={selectedBook} /></div><div><span className="eyebrow">{selectedBook.category}</span><h3>{selectedBook.title}</h3><p>{selectedBook.description || "Find this title on the library shelves."}</p><div className="detail-stats"><span><b>{selectedBook.available}</b> copies free to borrow</span><span><b>{selectedBook.total}</b> copies in the library</span><span>Shelf <b>{selectedBook.shelf || "Unassigned"}</b></span></div></div></section>
+    <section className="book-detail-hero"><div className="detail-cover-wrap"><BookCover book={selectedBook} /></div><div><span className="eyebrow">{selectedBook.category}</span><h3>{selectedBook.title}</h3><p>{selectedBook.description || "Find this title on the library shelves."}</p><BookRating rating={selectedBook.average_rating} count={selectedBook.rating_count} /><div className="detail-stats"><span><b>{selectedBook.available}</b> copies free to borrow</span><span><b>{selectedBook.total}</b> copies in the library</span><span>Shelf <b>{selectedBook.shelf || "Unassigned"}</b></span></div></div></section>
     <section className="panel detail-next-step"><span className="eyebrow">READY TO BORROW</span><h3>Scan the QR on your chosen copy</h3><p>Go back to the catalogue to open the scanner. The librarian scans the same copy QR when you return it.</p><button className="button primary" onClick={onBackToBooks}>Back to catalogue and scanner</button></section>
+    <StudentBookReviews key={selectedBook.id} book={selectedBook} setNotice={setNotice} onRatingChange={onBookRatingChange} />
   </>;
 
   if (tab === "my_loans") return <>
@@ -711,7 +785,7 @@ export default function App() {
   const active = tabs.find((item) => item[0] === activeTab) || tabs[0];
   let content;
   if (tab === "account") content = <AccountPage user={user} setNotice={setNotice} />;
-  else if (isStudent) content = <StudentPortal key={tab} user={user} tab={tab} setNotice={setNotice} selectedBook={selectedBook} onOpenBook={(book) => { setSelectedBook(book); setTab("student_book"); }} onBackToBooks={() => setTab("catalogue")} />;
+  else if (isStudent) content = <StudentPortal key={tab} user={user} tab={tab} setNotice={setNotice} selectedBook={selectedBook} onOpenBook={(book) => { setSelectedBook(book); setTab("student_book"); }} onBackToBooks={() => setTab("catalogue")} onBookRatingChange={(ratings) => setSelectedBook((book) => book ? { ...book, ...ratings } : book)} />;
   else if (tab === "overview") content = <Dashboard setNotice={setNotice} onNavigate={setTab} />;
   else if (tab === "books") content = <BooksPage setNotice={setNotice} onAddBook={() => setTab("add_book")} onOpenBook={(book) => { setSelectedBook(book); setTab("book_detail"); }} />;
   else if (tab === "add_book") content = <AddBookPage setNotice={setNotice} onCancel={() => setTab("books")} onSaved={(book) => { setSelectedBook(book); setTab("book_detail"); }} />;

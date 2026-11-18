@@ -650,6 +650,58 @@ class CampusShelfFeatureApiTests(TestCase):
         self.assertEqual(fine.status, FineEntry.PAID)
         self.assertIsNotNone(fine.paid_at)
 
+    def test_student_can_publish_and_update_a_public_book_rating(self):
+        student_group, _ = Group.objects.get_or_create(name="Students")
+        student_user = User.objects.create_user(
+            username="STU-RATE-01",
+            password="StudentPass123!",
+            email="rate.reader@campus.edu",
+        )
+        student_user.groups.add(student_group)
+        member = Member.objects.create(
+            user=student_user,
+            student_id="STU-RATE-01",
+            name="Rating Reader",
+            email="rate.reader@campus.edu",
+            course="CSE",
+            year=2,
+        )
+        student_client = Client()
+        student_client.force_login(student_user)
+
+        created = student_client.post("/api/student/reviews/", {
+            "book_id": str(self.book.id),
+            "rating": "5",
+            "comment": "A thoughtful and useful read.",
+        })
+
+        self.assertEqual(created.status_code, 201)
+        self.assertFalse(created.json()["updated"])
+        public_client = Client()
+        public_reviews = public_client.get(f"/api/books/{self.book.id}/reviews/")
+        self.assertEqual(public_reviews.status_code, 200)
+        self.assertEqual(public_reviews.json()["average_rating"], 5)
+        self.assertEqual(public_reviews.json()["rating_count"], 1)
+        self.assertEqual(public_reviews.json()["results"][0]["member_name"], member.name)
+        self.assertIsNone(public_reviews.json()["my_review"])
+        public_catalogue = public_client.get("/api/catalogue/")
+        rated_book = next(book for book in public_catalogue.json()["results"] if book["id"] == str(self.book.id))
+        self.assertEqual(rated_book["average_rating"], 5)
+        self.assertEqual(rated_book["rating_count"], 1)
+
+        update = student_client.post("/api/student/reviews/", {
+            "book_id": str(self.book.id),
+            "rating": "3",
+            "comment": "Still helpful on a second read.",
+        })
+        self.assertEqual(update.status_code, 200)
+        self.assertTrue(update.json()["updated"])
+        self.assertEqual(Review.objects.filter(book=self.book, member=member).count(), 1)
+        updated_reviews = student_client.get(f"/api/books/{self.book.id}/reviews/").json()
+        self.assertEqual(updated_reviews["average_rating"], 3)
+        self.assertEqual(updated_reviews["rating_count"], 1)
+        self.assertEqual(updated_reviews["my_review"]["rating"], 3)
+
     def test_student_fines_include_legacy_entries_by_student_id_only(self):
         student_group, _ = Group.objects.get_or_create(name="Students")
         student_user = User.objects.create_user(

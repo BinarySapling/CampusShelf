@@ -22,6 +22,7 @@ from .forms import (
     ManualIssueForm,
     ReviewForm,
     StudentIssueForm,
+    StudentReviewForm,
     StudentSignupForm,
 )
 from .models import Book, BookCopy, Borrowing, FineEntry, Member, Review, StudentSignupRequest
@@ -97,8 +98,40 @@ def account_data(user):
     return None
 
 
-def book_data(book):
+def book_ratings_for_books(books):
+    books = list(books)
+    if not books:
+        return {}
+
+    book_ids = {str(book.pk) for book in books}
+    titles = {}
+    for book in books:
+        titles.setdefault(book.title, []).append(str(book.pk))
+
+    reviews = Review.objects.filter(
+        Q(book_id__in=[book.pk for book in books])
+        | Q(book__isnull=True, book_title__in=list(titles))
+    ).values_list("book_id", "book_title", "rating")
+    totals = {book_id: [0, 0] for book_id in book_ids}
+    for review_book_id, book_title, rating in reviews:
+        target_ids = [str(review_book_id)] if review_book_id else titles.get(book_title, [])
+        for book_id in target_ids:
+            if book_id in totals:
+                totals[book_id][0] += rating
+                totals[book_id][1] += 1
+
+    return {
+        book_id: {
+            "average_rating": round(total / count, 1) if count else 0,
+            "rating_count": count,
+        }
+        for book_id, (total, count) in totals.items()
+    }
+
+
+def book_data(book, rating_summary=None):
     copies = list(BookCopy.objects.filter(book=book))
+    rating_summary = rating_summary or {"average_rating": 0, "rating_count": 0}
     return {
         "id": str(book.pk),
         "title": book.title,
@@ -109,6 +142,8 @@ def book_data(book):
         "description": book.description,
         "available": sum(copy.status == BookCopy.AVAILABLE for copy in copies),
         "total": len(copies),
+        "average_rating": rating_summary["average_rating"],
+        "rating_count": rating_summary["rating_count"],
     }
 
 
@@ -385,7 +420,9 @@ def catalogue(request):
     books = Book.objects.all()
     if query:
         books = books.filter(Q(title__icontains=query) | Q(author__icontains=query))
-    return JsonResponse({"results": [book_data(book) for book in books[:100]]})
+    books = list(books[:100])
+    ratings = book_ratings_for_books(books)
+    return JsonResponse({"results": [book_data(book, ratings[str(book.pk)]) for book in books]})
 
 
 @librarian_api
@@ -395,7 +432,9 @@ def books_api(request):
         books = Book.objects.all()
         if query:
             books = books.filter(Q(title__icontains=query) | Q(author__icontains=query))
-        return JsonResponse({"results": [book_data(book) for book in books[:200]]})
+        books = list(books[:200])
+        ratings = book_ratings_for_books(books)
+        return JsonResponse({"results": [book_data(book, ratings[str(book.pk)]) for book in books]})
     if request.method != "POST":
         return JsonResponse({"error": "Use GET or POST."}, status=405)
 
@@ -684,6 +723,75 @@ def reviews_list(request):
         "comment": review.comment,
         "created_at": review.created_at.isoformat(),
     } for review in Review.objects.all()[:100]]})
+
+
+@require_GET
+def book_reviews(request, book_id):
+    object_id = to_object_id(book_id)
+    book = Book.objects.filter(pk=object_id).first() if object_id else None
+    if not book:
+        return JsonResponse({"error": "Book not found."}, status=404)
+
+    review_query = Review.objects.filter(
+        Q(book=book) | Q(book__isnull=True, book_title=book.title)
+    ).order_by("-created_at")
+    ratings = list(review_query.values_list("rating", flat=True))
+    count = len(ratings)
+    average = round(sum(ratings) / count, 1) if count else 0
+    current_review = None
+    if request.user.is_authenticated:
+        member = Member.objects.filter(user=request.user, approval_status=Member.APPROVED).first()
+        if member:
+            current_review = Review.objects.filter(book=book, member=member).order_by("-created_at").first()
+
+    return JsonResponse({
+        "average_rating": average,
+        "rating_count": count,
+        "my_review": {
+            "rating": current_review.rating,
+            "comment": current_review.comment,
+        } if current_review else None,
+        "results": [{
+            "id": str(review.pk),
+            "member_name": review.member_name or "Campus reader",
+            "rating": review.rating,
+            "comment": review.comment,
+            "created_at": review.created_at.isoformat(),
+        } for review in review_query[:50]],
+    })
+
+
+@student_api
+@require_POST
+def student_add_review(request):
+    form = StudentReviewForm(request.POST)
+    if not form.is_valid():
+        return JsonResponse({"errors": form_errors(form)}, status=400)
+    object_id = to_object_id(form.cleaned_data["book_id"])
+    book = Book.objects.filter(pk=object_id).first() if object_id else None
+    if not book:
+        return JsonResponse({"error": "Choose an existing book."}, status=404)
+
+    member = request.student_member
+    review = Review.objects.filter(book=book, member=member).order_by("-created_at").first()
+    updated = review is not None
+    if review:
+        review.rating = form.cleaned_data["rating"]
+        review.comment = form.cleaned_data["comment"].strip()
+        review.save(update_fields=["rating", "comment"])
+    else:
+        review = Review.objects.create(
+            book=book,
+            member=member,
+            book_title=book.title,
+            member_name=member.name,
+            rating=form.cleaned_data["rating"],
+            comment=form.cleaned_data["comment"].strip(),
+        )
+    return JsonResponse({
+        "message": "Your rating was updated." if updated else "Your rating is now public.",
+        "updated": updated,
+    }, status=200 if updated else 201)
 
 
 @librarian_api
