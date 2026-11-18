@@ -835,6 +835,11 @@ class CampusShelfFeatureApiTests(TestCase):
             "shelf": "Q-02",
             "description": "Updated details",
         }
+        invalid_count = {**values, "copies": "201"}
+        rejected_count = self.staff_client.post(f"/api/books/{self.book.id}/", invalid_count)
+        self.assertEqual(rejected_count.status_code, 400)
+        self.assertEqual(BookCopy.objects.filter(book=self.book).exclude(status=BookCopy.RETIRED).count(), 1)
+
         increased = self.staff_client.post(f"/api/books/{self.book.id}/", values)
         self.assertEqual(increased.status_code, 200)
         self.book.refresh_from_db()
@@ -917,4 +922,34 @@ class CampusShelfFeatureApiTests(TestCase):
         self.assertEqual(report.json()["totals"]["borrowings"], 2)
         self.assertIn("QR Reader", [item["title"] for item in report.json()["popular_books"]])
         self.assertEqual(len(report.json()["circulation"]), 6)
+
+    def test_qr_return_reconciles_copy_when_loan_snapshot_copy_id_is_stale(self):
+        member, _ = self.make_student("STALE-COPY")
+        loan = Borrowing.objects.create(
+            book=None,
+            member=member,
+            book_copy=self.copy,
+            issue_code="CS-STALE-COPY-SNAPSHOT",
+            copy_id="CSB-UNKNOWN-COPY",
+            book_title=self.book.title,
+            member_name=member.name,
+            member_student_id=member.student_id,
+            status=Borrowing.BORROWED,
+            borrowed_at=timezone.now(),
+            due_at=timezone.now() + timedelta(days=14),
+        )
+        self.copy.status = BookCopy.BORROWED
+        self.copy.current_member = member
+        self.copy.current_issue_code = loan.issue_code
+        self.copy.save(update_fields=["status", "current_member", "current_issue_code"])
+        Book.objects.filter(pk=self.book.pk).update(copies=0, available=False)
+
+        returned = self.staff_client.post("/api/returns/copy/", {"copy_id": self.copy.copy_id})
+
+        self.assertEqual(returned.status_code, 200)
+        self.assertEqual(returned.json()["loan"]["status"], Borrowing.RETURNED)
+        self.copy.refresh_from_db()
+        self.assertEqual(self.copy.status, BookCopy.AVAILABLE)
+        self.book.refresh_from_db()
+        self.assertEqual(self.book.copies, 1)
 

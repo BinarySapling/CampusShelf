@@ -859,9 +859,13 @@ def deactivate_librarian(request, librarian_id):
     return redirect("librarians")
 
 
-def complete_return(record, returned_by=None):
+def complete_return(record, returned_by=None, copy_record=None):
     now = timezone.now()
-    copy_record = BookCopy.objects.filter(copy_id=record.copy_id).first()
+    copy_record = (
+        copy_record
+        or BookCopy.objects.filter(pk=record.book_copy_id).first()
+        or BookCopy.objects.filter(copy_id=record.copy_id).first()
+    )
     if copy_record:
         active_loans = Borrowing.objects.filter(status=Borrowing.BORROWED).filter(
             Q(book_copy_id=copy_record.pk) | Q(copy_id=copy_record.copy_id)
@@ -903,11 +907,12 @@ def complete_return(record, returned_by=None):
                 current_member=None,
                 issued_at=None,
             )
-    if record.book_id:
+    book = Book.objects.filter(pk=copy_record.book_id).first() if copy_record else None
+    if not book and record.book_id:
         book = Book.objects.filter(pk=record.book_id).first()
-        if book:
-            update_book_stock(book)
-            promote_available_reservations(book)
+    if book:
+        update_book_stock(book)
+        promote_available_reservations(book)
     return True
 
 

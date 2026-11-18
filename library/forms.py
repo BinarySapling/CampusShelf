@@ -7,6 +7,8 @@ from .models import Book
 
 
 class BookForm(forms.ModelForm):
+    copies = forms.IntegerField(min_value=0, max_value=200)
+
     class Meta:
         model = Book
         fields = [

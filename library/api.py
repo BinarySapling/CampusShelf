@@ -885,7 +885,7 @@ def return_copy(request):
     record = active_loans.first()
     if not record:
         return JsonResponse({"error": "No active loan was found for that Copy ID."}, status=404)
-    if not complete_return(record, returned_by=request.user):
+    if not complete_return(record, returned_by=request.user, copy_record=copy):
         return JsonResponse({"error": "This loan changed before the return could be recorded. Refresh the issue register and scan again."}, status=409)
     record.refresh_from_db()
     fine = FineEntry.objects.filter(borrowing=record, fine_type=FineEntry.OVERDUE).first()
