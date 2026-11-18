@@ -267,6 +267,11 @@ code { padding: 4px 6px; border: 1px solid #e6e8df; border-radius: 5px; backgrou
 .scan-side b { font-size: 10px; text-align: center; }
 .scan-side > span:not(.status):not(.scan-symbol) { color: #778178; font-size: 9px; }
 .scan-symbol { color: #64806a; font-size: 31px; }
+.student-fine-summary { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin: 0 0 16px; padding: 18px 21px; border: 1px solid #e4dfd1; border-radius: 12px; background: linear-gradient(120deg, #f7f4e9, #f4f5ee); }
+.student-fine-summary .eyebrow { color: #778064; }
+.student-fine-summary strong { display: block; margin-top: 5px; color: var(--ink); font: 400 30px/1 var(--display); }
+.student-fine-summary p { margin: 7px 0 0; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.student-fine-count { flex: 0 0 auto; padding: 7px 10px; border: 1px solid #ebd9c0; border-radius: 99px; background: #fff9ef; color: #916d3d; font-size: 9px; font-weight: 700; }
 
 /* Account, issue slip, loading and print */
 .issue-slip { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 15px; padding: 20px; border: 1px dashed #c9d0c3; border-radius: 13px; background: #fffefa; }
@@ -378,6 +383,7 @@ code { padding: 4px 6px; border: 1px solid #e6e8df; border-radius: 5px; backgrou
   .search-row .button { padding-inline: 11px; }
   .scan-result-card { grid-template-columns: 31px minmax(0, 1fr); }
   .scan-result-card > .status { grid-column: 2; justify-self: start; }
+  .student-fine-summary { align-items: flex-start; padding: 15px; }
 }
 @media (max-width: 380px) {
   .main-area { padding-inline: 11px; }

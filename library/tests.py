@@ -613,7 +613,15 @@ class CampusShelfFeatureApiTests(TestCase):
         self.assertEqual(self.copy.current_issue_code, loan.issue_code)
 
     def test_librarian_can_add_and_mark_a_custom_fine_paid(self):
+        student_group, _ = Group.objects.get_or_create(name="Students")
+        student_user = User.objects.create_user(
+            username="STU-FINE-01",
+            password="StudentPass123!",
+            email="fine.reader@campus.edu",
+        )
+        student_user.groups.add(student_group)
         member = Member.objects.create(
+            user=student_user,
             student_id="STU-FINE-01",
             name="Fine Reader",
             email="fine.reader@campus.edu",
@@ -629,11 +637,57 @@ class CampusShelfFeatureApiTests(TestCase):
         fine = FineEntry.objects.get(member=member)
         self.assertEqual(str(fine.amount), "35.50")
 
+        student_client = Client()
+        student_client.force_login(student_user)
+        student_fines = student_client.get("/api/fines/").json()["results"]
+        self.assertEqual(len(student_fines), 1)
+        self.assertEqual(student_fines[0]["amount"], "35.50")
+        self.assertEqual(student_fines[0]["reason"], "Damaged book cover")
+
         paid = self.staff_client.post(f"/api/fines/{fine.id}/paid/")
         self.assertEqual(paid.status_code, 200)
         fine.refresh_from_db()
         self.assertEqual(fine.status, FineEntry.PAID)
         self.assertIsNotNone(fine.paid_at)
+
+    def test_student_fines_include_legacy_entries_by_student_id_only(self):
+        student_group, _ = Group.objects.get_or_create(name="Students")
+        student_user = User.objects.create_user(
+            username="STU-LEGACY-FINE",
+            password="StudentPass123!",
+            email="legacy.fine@campus.edu",
+        )
+        student_user.groups.add(student_group)
+        member = Member.objects.create(
+            user=student_user,
+            student_id="STU-LEGACY-FINE",
+            name="Legacy Fine Reader",
+            email="legacy.fine@campus.edu",
+            course="CSE",
+            year=2,
+        )
+        own_fine = FineEntry.objects.create(
+            member=None,
+            member_name=member.name,
+            student_id=member.student_id,
+            amount="20.00",
+            fine_type=FineEntry.CUSTOM,
+            reason="Legacy record without a member link",
+        )
+        FineEntry.objects.create(
+            member_name="Another Reader",
+            student_id="STU-OTHER-FINE",
+            amount="90.00",
+            fine_type=FineEntry.CUSTOM,
+            reason="Another student's fine",
+        )
+
+        student_client = Client()
+        student_client.force_login(student_user)
+        response = student_client.get("/api/fines/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([entry["id"] for entry in response.json()["results"]], [str(own_fine.id)])
 
     def test_post_forms_require_csrf_token(self):
         librarian_group, _ = Group.objects.get_or_create(name="Librarians")

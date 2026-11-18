@@ -595,7 +595,9 @@ def fines_list(request):
         member = Member.objects.filter(user=request.user, approval_status=Member.APPROVED).first()
         if not member:
             return JsonResponse({"error": "An approved student account is required."}, status=403)
-        entries = FineEntry.objects.filter(member=member)
+        # Older fine records may have lost their nullable member reference while
+        # retaining the student ID snapshot. Keep those visible to that student.
+        entries = FineEntry.objects.filter(Q(member=member) | Q(student_id=member.student_id))
         active_loans = Borrowing.objects.filter(member=member, status=Borrowing.BORROWED)
 
     fixed_entries = [fine_data(entry) for entry in entries]
