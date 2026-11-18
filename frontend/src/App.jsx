@@ -4,22 +4,22 @@ import { api, formBody } from "./api.js";
 import Scanner from "./Scanner.jsx";
 
 const librarianTabs = [
-  ["overview", "Overview", "⌂"],
-  ["books", "Find a title", "⌕"],
-  ["add_book", "Add a book", "+"],
-  ["requests", "Signup requests", "✉"],
-  ["students", "Students", "♙"],
-  ["loans", "Issue & return", "↔"],
-  ["fines", "Fines", "₹"],
-  ["reviews", "Reader notes", "☆"],
-  ["account", "Account", "⚙"],
+  ["overview", "Overview", "overview"],
+  ["books", "Catalogue", "books"],
+  ["add_book", "Add a title", "add_book"],
+  ["requests", "Access requests", "requests"],
+  ["students", "Students", "students"],
+  ["loans", "Circulation", "loans"],
+  ["fines", "Fines", "fines"],
+  ["reviews", "Reader notes", "reviews"],
+  ["account", "Account", "account"],
 ];
 
 const studentTabs = [
-  ["catalogue", "Browse books", "▤"],
-  ["my_loans", "My loans", "↔"],
-  ["my_fines", "My fines", "₹"],
-  ["account", "Account", "⚙"],
+  ["catalogue", "Discover", "books"],
+  ["my_loans", "My loans", "loans"],
+  ["my_fines", "My fines", "fines"],
+  ["account", "Account", "account"],
 ];
 
 function noticeText(setNotice, text, kind = "success") {
@@ -31,8 +31,33 @@ function StatCard({ label, value, note }) {
   return <article className="stat-card"><span>{label}</span><strong>{value ?? "—"}</strong><small>{note}</small></article>;
 }
 
-function PageTitle({ eyebrow, title, note, action, image = true }) {
-  return <div className={`page-title ${image ? "page-title-image" : ""}`}><div><span className="eyebrow">{eyebrow}</span><h2>{title}</h2>{note && <p>{note}</p>}</div>{action}{image && <img src="/assets/library-reading-room.jpg" alt="A sunny library reading table" />}</div>;
+function PageTitle({ eyebrow, title, note, action }) {
+  return <div className="page-title"><div><span className="eyebrow">{eyebrow}</span><h2>{title}</h2>{note && <p>{note}</p>}</div>{action}</div>;
+}
+
+function NavIcon({ name }) {
+  const paths = {
+    overview: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
+    books: <><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v17H6.5A2.5 2.5 0 0 0 4 22z" /><path d="M4 5.5v14A2.5 2.5 0 0 1 6.5 17H20M8 7h8" /></>,
+    add_book: <><path d="M5 4h11a2 2 0 0 1 2 2v7" /><path d="M5 4v16h7M8 8h6M16 16h6M19 13v6" /></>,
+    requests: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m4 7 8 6 8-6" /></>,
+    students: <><path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="10" cy="7" r="4" /><path d="M20 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></>,
+    loans: <><path d="M7 7h13l-3-3M20 7l-3 3M17 17H4l3 3M4 17l3-3" /></>,
+    fines: <><circle cx="12" cy="12" r="9" /><path d="M15 8.5a3.5 3.5 0 0 0-2.7-1.1c-1.5 0-2.5.8-2.5 1.9 0 3 5.7 1.3 5.7 4.6 0 1.3-1.1 2.3-2.9 2.3a4.2 4.2 0 0 1-3.2-1.3M12 5.5v13" /></>,
+    reviews: <><path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z" /></>,
+    account: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-1.8 3.1-.2-.1a1.7 1.7 0 0 0-1.8.4l-.1.1h-3.6l-.1-.2a1.7 1.7 0 0 0-1.6-1.1 1.7 1.7 0 0 0-1.2.5l-.1.1-3.1-1.8.1-.2A1.7 1.7 0 0 0 6 16l-.1-.1v-3.6l.2-.1a1.7 1.7 0 0 0 .6-2.8l-.1-.1 1.8-3.1.2.1a1.7 1.7 0 0 0 2.8-1.4V4.8H15v.2a1.7 1.7 0 0 0 2.8 1.2l.1-.1L21 7.9l-.1.2a1.7 1.7 0 0 0 .4 1.8l.1.1v3.6l-.2.1a1.7 1.7 0 0 0-1.8 1.3z" /></>,
+  };
+  return <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name] || paths.books}</svg>;
+}
+
+function BookCover({ book, compact = false }) {
+  const tone = (book.title?.charCodeAt(0) || 0) % 4;
+  return <div className={`book-cover-visual tone-${tone} ${compact ? "compact" : ""}`} aria-hidden="true">
+    <span>{book.category || "CampusShelf edition"}</span>
+    <strong>{book.title}</strong>
+    <small>{book.author}</small>
+    <i />
+  </div>;
 }
 
 function AuthScreen({ onLogin, onSetup, onSignup, setupAvailable }) {
@@ -93,12 +118,12 @@ function AuthScreen({ onLogin, onSetup, onSignup, setupAvailable }) {
         </div>
         <div className="auth-note"><span>✓</span> Copy QR codes only identify a book. Your account is always needed to borrow.</div>
       </section>
-      <aside className="auth-art"><img src="/assets/owl-librarian.png" alt="" /><div><span className="eyebrow">READ · RETURN · REPEAT</span><h2>Every book has a place. Every reader has a story.</h2><p>A friendly campus library desk, online whenever you need it.</p></div></aside>
+      <aside className="auth-art"><div className="auth-art-mark" aria-hidden="true">C<span>S</span></div><div><span className="eyebrow">A PLACE FOR THE NEXT CHAPTER</span><h2>Good books travel. Ideas stay with you.</h2><p>Your campus collection, ready when you are.</p></div></aside>
     </main>
   );
 }
 
-function Dashboard({ setNotice }) {
+function Dashboard({ setNotice, onNavigate }) {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
@@ -109,8 +134,8 @@ function Dashboard({ setNotice }) {
   }, []);
   return <>
     <section className="dashboard-hero">
-      <img src="/assets/library-reading-room.jpg" alt="Sunlight falling across an open book in the library" />
-      <div className="dashboard-hero-copy"><span className="eyebrow">CAMPUSSHELF / LIBRARIAN DESK</span><h2>A thoughtful space for every reader.</h2><p>Keep the shelves in order and help each book find its next reader.</p></div>
+      <div className="dashboard-hero-copy"><span className="eyebrow">THE LIBRARY DESK</span><h2>Make room for the next great read.</h2><p>One place to care for the collection, keep circulation moving, and welcome new readers.</p><button className="button hero-action" onClick={() => onNavigate("loans")}>Open circulation <span aria-hidden="true">↗</span></button></div>
+      <div className="dashboard-stamp" aria-hidden="true"><span>READ</span><b>CS</b><span>RETURN · REPEAT</span></div>
     </section>
     <div className="dashboard-intro"><div><span className="eyebrow">TODAY AT THE LIBRARY</span><h2>Here is what is happening.</h2></div><span className="dashboard-date">Your library, at a glance</span></div>
     <div className="stats-grid">
@@ -121,7 +146,7 @@ function Dashboard({ setNotice }) {
       <StatCard label="Late returns" value={loading ? "…" : stats?.overdue_loans} note="Fine starts the next day" />
       <StatCard label="Requests to review" value={loading ? "…" : stats?.pending_requests} note="Approve before portal access" />
     </div>
-    <div className="feature-note"><div className="feature-icon">₹</div><div><b>Overdue fines update automatically</b><p>₹20 for each calendar day after the due date. No daily job or duplicate charge is needed.</p></div></div>
+    <div className="feature-note"><div className="feature-icon">₹</div><div><b>Overdue fines are calculated consistently</b><p>₹20 per calendar day after the due date, with a single charge recorded when a late book is returned.</p></div></div>
   </>;
 }
 
@@ -158,7 +183,7 @@ function BooksPage({ setNotice, onAddBook, onOpenBook }) {
       <form className="search-row" onSubmit={(event) => { event.preventDefault(); loadBooks(search).catch((error) => noticeText(setNotice, error.message, "error")); }}><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Type a title or author" /><button className="button light" disabled={loading}>{loading ? "Loading…" : "Search"}</button></form>
       <p className="route-hint">{loading ? "Loading the collection…" : `${books.length} title${books.length === 1 ? "" : "s"} found · Select a book to open its copy labels.`}</p>
       <div className="catalogue-grid book-catalogue-grid">{books.map((book) => <button type="button" className="catalogue-card book-tile" key={book.id} onClick={() => onOpenBook(book)}>
-        <img src="/assets/library-reading-room.jpg" alt="" />
+        <BookCover book={book} />
         <span className="eyebrow">{book.category}</span><h3>{book.title}</h3><p>{book.author}</p>
         <div className="catalogue-footer"><span>{book.available} / {book.total} copies free</span><small>Shelf {book.shelf || "Unassigned"}</small></div>
         <span className="book-tile-link">Open copies →</span>
@@ -198,7 +223,7 @@ function AddBookPage({ setNotice, onSaved, onCancel }) {
         <label>Description<textarea name="description" maxLength="300" rows="4" placeholder="A short note about this title" /></label>
         <button className="button primary" disabled={busy}>{busy ? "Saving book…" : "Save book"}</button>
       </form>
-      <aside className="add-book-art"><img src="/assets/library-reading-room.jpg" alt="Open books on a sunny library table" /><div><span className="eyebrow">ONE TITLE, MANY READERS</span><h3>Every copy gets its own identity.</h3><p>CampusShelf creates a unique Copy ID for each copy you add.</p></div></aside>
+      <aside className="add-book-art"><div className="add-book-art-mark" aria-hidden="true"><BookCover book={{ title: "A new chapter", author: "CampusShelf", category: "YOUR COLLECTION" }} /></div><div><span className="eyebrow">ONE TITLE, MANY READERS</span><h3>Give every copy its own place.</h3><p>CampusShelf creates a unique Copy ID for each physical book so checkouts and returns stay tied to the right copy.</p></div></aside>
     </section>
   </>;
 }
@@ -215,10 +240,12 @@ function BookDetailPage({ book, setNotice, onBack }) {
   }, [book.id]);
 
   const availableCount = copies.filter((copy) => copy.status === "available").length;
+  const shelfLocations = [...new Set(copies.map((copy) => copy.shelf).filter(Boolean))];
+  const shelfLabel = shelfLocations.length ? shelfLocations.join(", ") : book.shelf || "Unassigned";
 
   return <>
     <PageTitle eyebrow="BOOK DETAILS / PHYSICAL COPIES" title={book.title} note={`${book.author} · ${book.category}`} action={<button className="button light" onClick={onBack}>← Back to titles</button>} />
-    <section className="book-detail-hero"><img src="/assets/library-reading-room.jpg" alt="Books and an open book at a library table" /><div><span className="eyebrow">{book.category}</span><h3>{book.title}</h3><p>{book.description || "A title in the CampusShelf collection."}</p><div className="detail-stats"><span><b>{book.total}</b> physical copies</span><span><b>{availableCount}</b> free to borrow</span><span><b>{copies.length - availableCount}</b> allotted</span></div></div></section>
+    <section className="book-detail-hero"><div className="detail-cover-wrap"><BookCover book={book} /></div><div><span className="eyebrow">{book.category}</span><h3>{book.title}</h3><p>{book.description || "A title in the CampusShelf collection."}</p><div className="detail-stats"><span><b>{book.total}</b> physical copies</span><span><b>{availableCount}</b> free to borrow</span><span><b>{copies.length - availableCount}</b> on loan</span><span><b>{shelfLocations.length > 1 ? "Shelves" : "Shelf"} {shelfLabel}</b></span></div></div></section>
     <section className="panel"><div className="panel-head"><div><span className="eyebrow">COPY BY COPY</span><h3>QR labels and availability</h3></div><button className="button light" disabled={loading || copies.length === 0} onClick={() => window.print()}>Print these labels</button></div>
       <div className="qr-grid copy-status-grid">{copies.map((copy) => <article className="qr-card copy-status-card" key={copy.id}><QRCodeSVG value={copy.copy_id} size={116} /><span className={`status ${copy.status}`}>{copy.status === "available" ? "Free to borrow" : "Allotted"}</span><b>{copy.copy_id}</b><span>Shelf {copy.shelf || "Unassigned"}</span>{copy.borrowed_to && <span>With {copy.borrowed_to}</span>}{copy.due_at && <span>Due {new Date(copy.due_at).toLocaleDateString()}</span>}{copy.issue_code && <small>Issue {copy.issue_code}</small>}</article>)}</div>
       {loading && <p className="empty">Loading copy labels…</p>}{!loading && copies.length === 0 && <p className="empty">This title has no physical copies yet.</p>}
@@ -304,8 +331,8 @@ function LoansPage({ setNotice }) {
     setScanOpen(false);
     setCopyId(value);
     try {
-      const copy = await api(`/copies/${encodeURIComponent(value)}/`);
-      setScanInfo(`${copy.book_title} · ${copy.status}`);
+      const copy = await api(`/copies/${encodeURIComponent(value)}/lookup/`);
+      setScanInfo({ ...copy, returned: false });
     } catch (error) {
       setScanInfo(null);
       noticeText(setNotice, error.message, "error");
@@ -320,12 +347,20 @@ function LoansPage({ setNotice }) {
       if (mode === "issue") {
         const result = await api("/loans/", { method: "POST", body: formBody(values) });
         noticeText(setNotice, `Issued ${result.loan.book_title} · ${result.loan.issue_code}`);
+        setCopyId("");
+        setScanInfo(null);
       } else {
         const result = await api("/returns/copy/", { method: "POST", body: formBody(values) });
         noticeText(setNotice, result.fine ? `Returned. Overdue fine: ₹${result.fine.amount}` : "Book returned. No overdue fine.");
+        setScanInfo({
+          ...(scanInfo || {}),
+          copy_id: result.loan.copy_id,
+          book_title: result.loan.book_title,
+          status: "available",
+          active_loan: false,
+          returned: true,
+        });
       }
-      setCopyId("");
-      setScanInfo(null);
       await load();
     } catch (error) {
       noticeText(setNotice, error.message, "error");
@@ -340,12 +375,12 @@ function LoansPage({ setNotice }) {
       <form className="issue-controls" onSubmit={submit}>
         {mode === "issue" && <label>Approved student<select value={memberId} onChange={(event) => setMemberId(event.target.value)} required><option value="">Choose a student</option>{members.map((member) => <option value={member.id} key={member.id}>{member.name} · {member.student_id}</option>)}</select></label>}
         <label>Physical Copy ID<input value={copyId} onChange={(event) => setCopyId(event.target.value.toUpperCase())} placeholder="Scan the QR or type CSB-…" required /></label>
-        <div className="button-line"><button className="button light" type="button" onClick={() => setScanOpen((open) => !open)}>{scanOpen ? "Close scanner" : "Open camera scanner"}</button><button className="button primary" disabled={busy}>{busy ? "Saving…" : mode === "issue" ? "Confirm issue" : "Complete return"}</button></div>
+        <div className="button-line"><button className="button light" type="button" onClick={() => setScanOpen((open) => !open)}>{scanOpen ? "Close scanner" : "Open camera scanner"}</button><button className="button primary" disabled={busy || scanInfo?.returned || (scanInfo && mode === "return" && !scanInfo.active_loan) || (scanInfo && mode === "issue" && scanInfo.status !== "available")}>{busy ? "Saving…" : mode === "issue" ? "Confirm issue" : scanInfo?.returned ? "Return recorded" : scanInfo?.active_loan ? "Complete this return" : "Complete return"}</button></div>
       </form>
       <Scanner open={scanOpen} onScan={scanned} onError={(message) => noticeText(setNotice, message, "error")} />
-      {scanInfo && <p className="scan-result">{scanInfo}</p>}
+      {scanInfo && <div className={`scan-result-card ${scanInfo.returned ? "complete" : ""}`} role="status"><span className="scan-result-mark" aria-hidden="true">{scanInfo.returned ? "✓" : "⌗"}</span><div><span className="eyebrow">{scanInfo.returned ? "RETURN RECORDED" : "COPY SCANNED"}</span><b>{scanInfo.book_title || "Physical copy"}</b><small>{scanInfo.copy_id}{scanInfo.member_name ? ` · With ${scanInfo.member_name}` : ""}{scanInfo.issue_code ? ` · ${scanInfo.issue_code}` : ""}</small><p>{scanInfo.returned ? "This copy is available to borrow again." : mode === "return" && scanInfo.active_loan ? "Active loan found. Complete the return to update the copy and its transaction." : scanInfo.status === "available" ? "Available to borrow. Select a student before issuing." : "No active loan was found for this copy. Review its transaction history before changing its status."}</p></div><span className={`status ${scanInfo.returned ? "available" : scanInfo.active_loan ? "borrowed" : scanInfo.status}`}>{scanInfo.returned ? "Available" : scanInfo.active_loan ? "On loan" : scanInfo.status}</span></div>}
     </section>
-    <section className="panel"><div className="panel-head"><div><span className="eyebrow">RECENT ACTIVITY</span><h3>Issue register</h3></div><span className="pill">{loans.length} records</span></div>
+    <section className="panel"><div className="panel-head"><div><span className="eyebrow">COMPLETE HISTORY</span><h3>Transaction register</h3></div><span className="pill">{loans.length} records</span></div>
       <div className="table-scroll"><table><thead><tr><th>Issue ID</th><th>Book / copy</th><th>Student</th><th>Due date</th><th>Current fine</th><th>Status</th></tr></thead><tbody>{loans.map((loan) => <tr key={loan.id}><td><code>{loan.issue_code}</code></td><td><b>{loan.book_title}</b><small>{loan.copy_id}</small></td><td>{loan.member_name}<small>{loan.student_id}</small></td><td>{new Date(loan.due_at).toLocaleDateString()}</td><td>{loan.current_fine === "0" ? "—" : `₹${loan.current_fine}`}</td><td><span className={`status ${loan.status}`}>{loan.status}</span></td></tr>)}</tbody></table></div>{loading && <p className="empty">Loading issue records…</p>}{!loading && loans.length === 0 && <p className="empty">No books have been issued yet.</p>}
     </section>
   </>;
@@ -585,10 +620,10 @@ function StudentPortal({ user, tab, setNotice, selectedBook, onOpenBook, onBackT
   }
 
   if (tab === "catalogue") return <>
-    <section className="student-welcome"><img src="/assets/library-reading-room.jpg" alt="A bright corner of the campus library" /><div><span className="eyebrow">YOUR CAMPUS LIBRARY</span><h2>Hello, {user.name.split(" ")[0]}.</h2><p>Find a title, then scan the QR on the exact copy you want to borrow.</p></div></section>
+    <section className="student-welcome"><div><span className="eyebrow">YOUR CAMPUS LIBRARY</span><h2>Hello, {user.name.split(" ")[0]}.</h2><p>Find a title that interests you, then check out the exact copy from its QR label.</p></div><div className="welcome-mark" aria-hidden="true"><span>YOUR NEXT</span><b>read</b><span>STARTS HERE</span></div></section>
     {slip && <IssueSlip loan={slip} onClose={() => setSlip(null)} />}
     <section className="panel"><div className="panel-head"><div><span className="eyebrow">COLLECTION</span><h3>Search the shelves</h3></div></div><form className="search-row" onSubmit={search}><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search books or authors" /><button className="button light" disabled={loading}>{loading ? "Loading…" : "Search"}</button></form>
-      <div className="catalogue-grid book-catalogue-grid">{books.map((book) => <button type="button" className="catalogue-card book-tile" key={book.id} onClick={() => onOpenBook(book)}><img src="/assets/library-reading-room.jpg" alt="" /><span className="eyebrow">{book.category}</span><h3>{book.title}</h3><p>{book.author}</p><div className="catalogue-footer"><span>{book.available} copies free</span><small>Shelf {book.shelf || "Unassigned"}</small></div><span className="book-tile-link">Open title →</span></button>)}{loading && <p className="empty">Loading books…</p>}{!loading && books.length === 0 && <p className="empty">No books match that search.</p>}</div>
+      <div className="catalogue-grid book-catalogue-grid">{books.map((book) => <button type="button" className="catalogue-card book-tile" key={book.id} onClick={() => onOpenBook(book)}><BookCover book={book} /><span className="eyebrow">{book.category}</span><h3>{book.title}</h3><p>{book.author}</p><div className="catalogue-footer"><span>{book.available} copies free</span><small>Shelf {book.shelf || "Unassigned"}</small></div><span className="book-tile-link">View title <span aria-hidden="true">↗</span></span></button>)}{loading && <p className="empty">Loading books…</p>}{!loading && books.length === 0 && <p className="empty">No books match that search.</p>}</div>
     </section>
     <section className="panel scan-student"><div><span className="eyebrow">READY TO BORROW</span><h3>Scan your copy</h3><p>Sign in first, scan the QR label, and confirm the issue. You can borrow up to five books.</p><button className="button primary" disabled={busy} onClick={() => setScanOpen((open) => !open)}>{scanOpen ? "Close camera" : "Open QR scanner"}</button></div><div className="scan-side">{copyInfo ? <><b>{copyInfo.book_title}</b><span>{copyInfo.copy_id}</span><span className={`status ${copyInfo.status}`}>{copyInfo.status}</span>{copyInfo.status === "available" && <button className="button dark" disabled={busy} onClick={issueCopy}>{busy ? "Checking out…" : "Confirm checkout"}</button>}</> : <span className="scan-symbol">⌗</span>}</div></section>
     <Scanner open={scanOpen} onScan={scanned} onError={(message) => noticeText(setNotice, message, "error")} />
@@ -596,7 +631,7 @@ function StudentPortal({ user, tab, setNotice, selectedBook, onOpenBook, onBackT
 
   if (tab === "student_book") return <>
     <PageTitle eyebrow="STUDENT CATALOGUE / TITLE DETAILS" title={selectedBook.title} note={`${selectedBook.author} · ${selectedBook.category}`} action={<button className="button light" onClick={onBackToBooks}>← Back to books</button>} />
-    <section className="book-detail-hero"><img src="/assets/library-reading-room.jpg" alt="A reading table in the campus library" /><div><span className="eyebrow">{selectedBook.category}</span><h3>{selectedBook.title}</h3><p>{selectedBook.description || "Find this title on the library shelves."}</p><div className="detail-stats"><span><b>{selectedBook.available}</b> copies free to borrow</span><span><b>{selectedBook.total}</b> copies in the library</span><span>Shelf <b>{selectedBook.shelf || "Unassigned"}</b></span></div></div></section>
+    <section className="book-detail-hero"><div className="detail-cover-wrap"><BookCover book={selectedBook} /></div><div><span className="eyebrow">{selectedBook.category}</span><h3>{selectedBook.title}</h3><p>{selectedBook.description || "Find this title on the library shelves."}</p><div className="detail-stats"><span><b>{selectedBook.available}</b> copies free to borrow</span><span><b>{selectedBook.total}</b> copies in the library</span><span>Shelf <b>{selectedBook.shelf || "Unassigned"}</b></span></div></div></section>
     <section className="panel detail-next-step"><span className="eyebrow">READY TO BORROW</span><h3>Scan the QR on your chosen copy</h3><p>Go back to the catalogue to open the scanner. The librarian scans the same copy QR when you return it.</p><button className="button primary" onClick={onBackToBooks}>Back to catalogue and scanner</button></section>
   </>;
 
@@ -668,12 +703,12 @@ export default function App() {
 
   const isStudent = user.role === "student";
   const tabs = isStudent ? studentTabs : librarianTabs;
-  const activeTab = tab === "book_detail" ? "books" : tab === "student_book" ? "catalogue" : tab;
+  const activeTab = tab === "book_detail" || tab === "add_book" ? "books" : tab === "student_book" ? "catalogue" : tab;
   const active = tabs.find((item) => item[0] === activeTab) || tabs[0];
   let content;
   if (tab === "account") content = <AccountPage user={user} setNotice={setNotice} />;
   else if (isStudent) content = <StudentPortal key={tab} user={user} tab={tab} setNotice={setNotice} selectedBook={selectedBook} onOpenBook={(book) => { setSelectedBook(book); setTab("student_book"); }} onBackToBooks={() => setTab("catalogue")} />;
-  else if (tab === "overview") content = <Dashboard setNotice={setNotice} />;
+  else if (tab === "overview") content = <Dashboard setNotice={setNotice} onNavigate={setTab} />;
   else if (tab === "books") content = <BooksPage setNotice={setNotice} onAddBook={() => setTab("add_book")} onOpenBook={(book) => { setSelectedBook(book); setTab("book_detail"); }} />;
   else if (tab === "add_book") content = <AddBookPage setNotice={setNotice} onCancel={() => setTab("books")} onSaved={(book) => { setSelectedBook(book); setTab("book_detail"); }} />;
   else if (tab === "book_detail" && selectedBook) content = <BookDetailPage key={selectedBook.id} book={selectedBook} setNotice={setNotice} onBack={() => setTab("books")} />;
@@ -688,11 +723,11 @@ export default function App() {
     <aside className="sidebar">
       <div className="sidebar-brand"><img src="/assets/campusshelf-emblem.png" alt="" /><div><b>CampusShelf</b><small>{isStudent ? "STUDENT PORTAL" : "LIBRARIAN DESK"}</small></div></div>
       <div className="sidebar-label">{isStudent ? "YOUR LIBRARY" : "WORKSPACE"}</div>
-      <nav>{tabs.map(([key, label, icon]) => <button className={tab === key ? "active" : ""} key={key} onClick={() => setTab(key)}><span className="nav-icon">{icon}</span>{label}{key === "requests" && <i className="nav-dot" />}</button>)}</nav>
+      <nav aria-label={isStudent ? "Student portal" : "Librarian workspace"}>{tabs.map(([key, label, icon]) => <button className={activeTab === key ? "active" : ""} key={key} onClick={() => setTab(key)}><NavIcon name={icon} />{label}</button>)}</nav>
       {!isStudent && <div className="sidebar-help"><span className="eyebrow">QUICK NOTE</span><p>Scan the label on the physical copy, not the book cover.</p><a href="/admin/">Open Django Admin ↗</a></div>}
-      <div className="sidebar-user"><div className="avatar">{user.name.slice(0, 1).toUpperCase()}</div><div><b>{user.name}</b><small>{isStudent ? user.student_id : user.login_id}</small></div><button title="Sign out" onClick={signOut}>↗</button></div>
+      <div className="sidebar-user"><div className="avatar">{user.name.slice(0, 1).toUpperCase()}</div><div><b>{user.name}</b><small>{isStudent ? user.student_id : user.login_id}</small></div><button className="signout-button" title="Sign out" onClick={signOut}>Sign out</button></div>
     </aside>
-    <main className="main-area"><header className="topbar"><div><span className="eyebrow">{active[1].toUpperCase()}</span><h1>{active[1]}</h1></div><div className="topbar-right"><span className="db-indicator"><i /> MongoDB</span><span className="top-date">CampusShelf Library</span></div></header>
+    <main className="main-area"><header className="topbar"><div><span className="eyebrow">{isStudent ? "STUDENT PORTAL" : "LIBRARIAN WORKSPACE"}</span><h1>{active[1]}</h1></div><div className="topbar-right"><span className="portal-chip">{isStudent ? "Reader account" : "Library staff"}</span><span className="top-date">CampusShelf</span></div></header>
       {notice && <div className={`notice ${notice.kind}`} role="status">{notice.text}<button onClick={() => setNotice(null)}>×</button></div>}
       <div className="page-content">{content}</div>
     </main>

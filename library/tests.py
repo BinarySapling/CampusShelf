@@ -531,6 +531,87 @@ class CampusShelfFeatureApiTests(TestCase):
         self.assertEqual(fines.status_code, 200)
         self.assertEqual(fines.json()["results"][0]["amount"], "40")
 
+    def test_qr_return_reconciles_a_stale_copy_issue_code(self):
+        member = Member.objects.create(
+            student_id="STU-RETURN-REPAIR",
+            name="Return Reader",
+            email="return.reader@campus.edu",
+            course="CSE",
+            year=2,
+        )
+        loan = Borrowing.objects.create(
+            book=self.book,
+            member=member,
+            book_copy=self.copy,
+            issue_code="CS-RETURN-REPAIR",
+            copy_id=self.copy.copy_id,
+            book_title=self.book.title,
+            member_name=member.name,
+            member_student_id=member.student_id,
+            status=Borrowing.BORROWED,
+            borrowed_at=timezone.now(),
+            due_at=timezone.now() + timedelta(days=14),
+        )
+        self.copy.status = BookCopy.BORROWED
+        self.copy.current_member = member
+        self.copy.current_issue_code = "CS-STALE-COPY-ISSUE"
+        self.copy.save(update_fields=["status", "current_member", "current_issue_code"])
+
+        scan = self.staff_client.get(f"/api/copies/{self.copy.copy_id}/lookup/")
+        self.assertEqual(scan.status_code, 200)
+        self.assertEqual(scan.json()["status"], BookCopy.BORROWED)
+        self.assertTrue(scan.json()["active_loan"])
+
+        returned = self.staff_client.post("/api/returns/copy/", {"copy_id": self.copy.copy_id})
+
+        self.assertEqual(returned.status_code, 200)
+        self.assertEqual(returned.json()["loan"]["status"], Borrowing.RETURNED)
+        loan.refresh_from_db()
+        self.copy.refresh_from_db()
+        self.assertEqual(loan.status, Borrowing.RETURNED)
+        self.assertEqual(self.copy.status, BookCopy.AVAILABLE)
+        self.assertEqual(self.copy.current_issue_code, "")
+        scan_after_return = self.staff_client.get(f"/api/copies/{self.copy.copy_id}/lookup/")
+        self.assertEqual(scan_after_return.json()["status"], BookCopy.AVAILABLE)
+        self.assertFalse(scan_after_return.json()["active_loan"])
+
+    def test_issue_repairs_available_copy_with_an_active_loan_instead_of_duplicating_it(self):
+        member = Member.objects.create(
+            student_id="STU-ISSUE-REPAIR",
+            name="Active Reader",
+            email="active.reader@campus.edu",
+            course="CSE",
+            year=2,
+        )
+        loan = Borrowing.objects.create(
+            book=self.book,
+            member=member,
+            book_copy=self.copy,
+            issue_code="CS-ISSUE-REPAIR",
+            copy_id=self.copy.copy_id,
+            book_title=self.book.title,
+            member_name=member.name,
+            member_student_id=member.student_id,
+            status=Borrowing.BORROWED,
+            borrowed_at=timezone.now(),
+            due_at=timezone.now() + timedelta(days=14),
+        )
+        self.copy.status = BookCopy.AVAILABLE
+        self.copy.current_issue_code = ""
+        self.copy.current_member = None
+        self.copy.save(update_fields=["status", "current_issue_code", "current_member"])
+
+        response = self.staff_client.post("/api/loans/", {
+            "member_id": str(member.id),
+            "copy_id": self.copy.copy_id,
+        })
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(Borrowing.objects.filter(copy_id=self.copy.copy_id, status=Borrowing.BORROWED).count(), 1)
+        self.copy.refresh_from_db()
+        self.assertEqual(self.copy.status, BookCopy.BORROWED)
+        self.assertEqual(self.copy.current_issue_code, loan.issue_code)
+
     def test_librarian_can_add_and_mark_a_custom_fine_paid(self):
         member = Member.objects.create(
             student_id="STU-FINE-01",

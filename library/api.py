@@ -425,14 +425,15 @@ def copies_list(request, book_id):
     object_id = to_object_id(book_id)
     book = get_object_or_404(Book, pk=object_id) if object_id else None
     copies = BookCopy.objects.filter(book=book).order_by("copy_id")
-    active_loans = {
-        loan.copy_id: loan
-        for loan in Borrowing.objects.filter(book=book, status=Borrowing.BORROWED)
-    }
+    active_loans = {}
+    for loan in Borrowing.objects.filter(book=book, status=Borrowing.BORROWED).select_related("book_copy"):
+        active_copy_id = loan.copy_id or (loan.book_copy.copy_id if loan.book_copy_id else "")
+        if active_copy_id:
+            active_loans[active_copy_id] = loan
     return JsonResponse({"results": [{
         "id": str(copy.pk),
         "copy_id": copy.copy_id,
-        "status": copy.status,
+        "status": Borrowing.BORROWED if copy.copy_id in active_loans else copy.status,
         "shelf": copy.shelf,
         "book_title": book.title,
         "borrowed_to": active_loans[copy.copy_id].member_name if copy.copy_id in active_loans else "",
@@ -445,23 +446,15 @@ def copies_list(request, book_id):
 @require_GET
 def all_copies_list(request):
     copies = BookCopy.objects.select_related("book").order_by("book__title", "copy_id")
+    active_copy_ids = set()
+    for loan in Borrowing.objects.filter(status=Borrowing.BORROWED).select_related("book_copy"):
+        active_copy_id = loan.copy_id or (loan.book_copy.copy_id if loan.book_copy_id else "")
+        if active_copy_id:
+            active_copy_ids.add(active_copy_id)
     return JsonResponse({"results": [{
         "id": str(copy.pk),
         "copy_id": copy.copy_id,
-        "status": copy.status,
-        "shelf": copy.shelf,
-        "book_title": copy.book.title,
-    } for copy in copies]})
-
-
-@librarian_api
-@require_GET
-def all_copies_list(request):
-    copies = BookCopy.objects.select_related("book").order_by("book__title", "copy_id")
-    return JsonResponse({"results": [{
-        "id": str(copy.pk),
-        "copy_id": copy.copy_id,
-        "status": copy.status,
+        "status": Borrowing.BORROWED if copy.copy_id in active_copy_ids else copy.status,
         "shelf": copy.shelf,
         "book_title": copy.book.title,
     } for copy in copies]})
@@ -473,10 +466,14 @@ def copy_lookup(request, copy_id):
     copy = BookCopy.objects.filter(copy_id=copy_id.strip().upper()).select_related("book").first()
     if not copy:
         return JsonResponse({"error": "Copy ID not found."}, status=404)
-    active_loan = Borrowing.objects.filter(book_copy=copy, status=Borrowing.BORROWED).first()
+    active_loan = Borrowing.objects.filter(
+        Q(book_copy=copy) | Q(copy_id=copy.copy_id),
+        status=Borrowing.BORROWED,
+    ).order_by("-borrowed_at").first()
     return JsonResponse({
         "copy_id": copy.copy_id,
-        "status": copy.status,
+        "status": Borrowing.BORROWED if active_loan else copy.status,
+        "active_loan": active_loan is not None,
         "book_title": copy.book.title,
         "member_name": active_loan.member_name if active_loan else "",
         "issue_code": active_loan.issue_code if active_loan else "",
@@ -491,9 +488,13 @@ def scan_copy(request, copy_id):
     copy = BookCopy.objects.filter(copy_id=copy_id.strip().upper()).select_related("book").first()
     if not copy:
         return JsonResponse({"error": "Copy ID not found."}, status=404)
+    active_loan = Borrowing.objects.filter(
+        Q(book_copy=copy) | Q(copy_id=copy.copy_id),
+        status=Borrowing.BORROWED,
+    ).order_by("-borrowed_at").first()
     return JsonResponse({
         "copy_id": copy.copy_id,
-        "status": copy.status,
+        "status": Borrowing.BORROWED if active_loan else copy.status,
         "book_title": copy.book.title,
         "shelf": copy.shelf,
     })
@@ -502,7 +503,7 @@ def scan_copy(request, copy_id):
 @librarian_api
 def loans_api(request):
     if request.method == "GET":
-        loans = Borrowing.objects.all()[:200]
+        loans = Borrowing.objects.all()
         return JsonResponse({"results": [borrowing_data(record) for record in loans]})
     if request.method != "POST":
         return JsonResponse({"error": "Use GET or POST."}, status=405)
@@ -552,7 +553,7 @@ def student_issue(request):
 @student_api
 @require_GET
 def student_loans(request):
-    loans = Borrowing.objects.filter(member=request.student_member)[:100]
+    loans = Borrowing.objects.filter(member=request.student_member)
     return JsonResponse({"results": [borrowing_data(record) for record in loans]})
 
 
@@ -560,12 +561,20 @@ def student_loans(request):
 @require_POST
 def return_copy(request):
     copy_id = request.POST.get("copy_id", "").strip().upper()
-    copy = BookCopy.objects.filter(copy_id=copy_id, status=BookCopy.BORROWED).first()
-    record = Borrowing.objects.filter(book_copy=copy, status=Borrowing.BORROWED).first() if copy else None
+    copy = BookCopy.objects.filter(copy_id=copy_id).select_related("book").first()
+    if not copy:
+        return JsonResponse({"error": "Copy ID not found."}, status=404)
+    active_loans = Borrowing.objects.filter(
+        Q(book_copy=copy) | Q(copy_id=copy.copy_id),
+        status=Borrowing.BORROWED,
+    ).order_by("-borrowed_at")
+    if active_loans.count() > 1:
+        return JsonResponse({"error": "More than one active loan is linked to this copy. Ask an administrator to review its history."}, status=409)
+    record = active_loans.first()
     if not record:
         return JsonResponse({"error": "No active loan was found for that Copy ID."}, status=404)
     if not complete_return(record, returned_by=request.user):
-        return JsonResponse({"error": "This copy has already been returned."}, status=409)
+        return JsonResponse({"error": "This loan changed before the return could be recorded. Refresh the issue register and scan again."}, status=409)
     record.refresh_from_db()
     fine = FineEntry.objects.filter(borrowing=record, fine_type=FineEntry.OVERDUE).first()
     return JsonResponse({
@@ -580,13 +589,13 @@ def fines_list(request):
     if not request.user.is_authenticated:
         return JsonResponse({"error": "Please sign in first."}, status=401)
     if is_librarian(request.user):
-        entries = FineEntry.objects.all()[:300]
+        entries = FineEntry.objects.all()
         active_loans = Borrowing.objects.filter(status=Borrowing.BORROWED)
     else:
         member = Member.objects.filter(user=request.user, approval_status=Member.APPROVED).first()
         if not member:
             return JsonResponse({"error": "An approved student account is required."}, status=403)
-        entries = FineEntry.objects.filter(member=member)[:100]
+        entries = FineEntry.objects.filter(member=member)
         active_loans = Borrowing.objects.filter(member=member, status=Borrowing.BORROWED)
 
     fixed_entries = [fine_data(entry) for entry in entries]
@@ -654,7 +663,7 @@ def dashboard_data(request):
     return JsonResponse({
         "books": len(books),
         "copies": sum(book.total_copies for book in books),
-        "members": Member.objects.count(),
+        "members": Member.objects.filter(approval_status=Member.APPROVED).count(),
         "active_loans": len(loans),
         "overdue_loans": overdue,
         "pending_requests": StudentSignupRequest.objects.filter(status=StudentSignupRequest.PENDING).count(),

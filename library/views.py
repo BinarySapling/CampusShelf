@@ -133,6 +133,24 @@ def overdue_fine(record, today=None):
 
 def create_borrowing(member, copy_record):
     book = copy_record.book
+    active_loans = Borrowing.objects.filter(status=Borrowing.BORROWED).filter(
+        Q(book_copy_id=copy_record.pk) | Q(copy_id=copy_record.copy_id)
+    )
+    existing_loan = active_loans.first()
+    if existing_loan:
+        # Keep the copy aligned with its active issue if an older write left the
+        # inventory flag behind. Never create a second loan for the same copy.
+        update_fields = {"status": BookCopy.BORROWED}
+        if active_loans.count() == 1:
+            update_fields.update(
+                current_issue_code=existing_loan.issue_code,
+                current_member_id=existing_loan.member_id,
+                issued_at=existing_loan.borrowed_at,
+            )
+        BookCopy.objects.filter(pk=copy_record.pk).update(**update_fields)
+        update_book_stock(book)
+        return None
+
     now = timezone.now()
     record_id = ObjectId()
     issue_code = issue_code_for(record_id)
@@ -793,6 +811,14 @@ def deactivate_librarian(request, librarian_id):
 
 def complete_return(record, returned_by=None):
     now = timezone.now()
+    copy_record = BookCopy.objects.filter(copy_id=record.copy_id).first()
+    if copy_record:
+        active_loans = Borrowing.objects.filter(status=Borrowing.BORROWED).filter(
+            Q(book_copy_id=copy_record.pk) | Q(copy_id=copy_record.copy_id)
+        )
+        if active_loans.count() != 1 or not active_loans.filter(pk=record.pk).exists():
+            return False
+
     changed = Borrowing.objects.filter(pk=record.pk, status=Borrowing.BORROWED).update(
         status=Borrowing.RETURNED,
         returned_at=now,
@@ -814,17 +840,19 @@ def complete_return(record, returned_by=None):
             created_at=now,
         )
 
-    copy_record = BookCopy.objects.filter(
-        copy_id=record.copy_id,
-        current_issue_code=record.issue_code,
-        status=BookCopy.BORROWED,
-    ).first()
     if copy_record:
-        copy_record.status = BookCopy.AVAILABLE
-        copy_record.current_issue_code = ""
-        copy_record.current_member = None
-        copy_record.issued_at = None
-        copy_record.save(update_fields=["status", "current_issue_code", "current_member", "issued_at"])
+        # The active loan is the source of truth. Clear stale cached copy
+        # fields only after confirming that no other active issue uses it.
+        still_active = Borrowing.objects.filter(status=Borrowing.BORROWED).filter(
+            Q(book_copy_id=copy_record.pk) | Q(copy_id=copy_record.copy_id)
+        ).exists()
+        if not still_active:
+            BookCopy.objects.filter(pk=copy_record.pk).update(
+                status=BookCopy.AVAILABLE,
+                current_issue_code="",
+                current_member=None,
+                issued_at=None,
+            )
     if record.book_id:
         book = Book.objects.filter(pk=record.book_id).first()
         if book:
