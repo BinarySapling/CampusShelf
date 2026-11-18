@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Book, BookCopy, Borrowing, FineEntry, Member, Review, StudentSignupRequest
+from .models import Book, BookCopy, BookReservation, Borrowing, FineEntry, LoanRenewalRequest, Member, Review, StudentSignupRequest
 
 
 @admin.register(Book)
@@ -35,6 +35,20 @@ class StudentSignupRequestAdmin(admin.ModelAdmin):
 class BorrowingAdmin(admin.ModelAdmin):
     list_display = ("issue_code", "book_title", "member_name", "status", "borrowed_at", "due_at")
     search_fields = ("issue_code", "book_title", "member_name", "member_student_id")
+    list_filter = ("status",)
+
+
+@admin.register(BookReservation)
+class BookReservationAdmin(admin.ModelAdmin):
+    list_display = ("book_title", "member", "status", "created_at", "updated_at")
+    search_fields = ("book_title", "member__name", "member__student_id")
+    list_filter = ("status",)
+
+
+@admin.register(LoanRenewalRequest)
+class LoanRenewalRequestAdmin(admin.ModelAdmin):
+    list_display = ("borrowing", "member", "status", "created_at", "reviewed_at", "reviewed_by")
+    search_fields = ("borrowing__issue_code", "borrowing__book_title", "member__name", "member__student_id")
     list_filter = ("status",)
 
 

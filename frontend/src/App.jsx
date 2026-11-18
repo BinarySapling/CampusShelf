@@ -7,6 +7,9 @@ const librarianTabs = [
   ["overview", "Overview", "overview"],
   ["books", "Catalogue", "books"],
   ["add_book", "Add a title", "add_book"],
+  ["reservations", "Book holds", "requests"],
+  ["renewals", "Renewals", "loans"],
+  ["reports", "Reports", "overview"],
   ["requests", "Access requests", "requests"],
   ["students", "Students", "students"],
   ["loans", "Circulation", "loans"],
@@ -18,6 +21,7 @@ const librarianTabs = [
 const studentTabs = [
   ["catalogue", "Discover", "books"],
   ["my_loans", "My loans", "loans"],
+  ["my_holds", "My holds", "requests"],
   ["my_fines", "My fines", "fines"],
   ["account", "Account", "account"],
 ];
@@ -163,18 +167,25 @@ function BooksPage({ setNotice, onAddBook, onOpenBook }) {
   const [books, setBooks] = useState([]);
   const [copies, setCopies] = useState(null);
   const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("");
+  const [availability, setAvailability] = useState("all");
+  const [categories, setCategories] = useState([]);
+  const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 });
   const [loading, setLoading] = useState(true);
 
-  async function loadBooks(query = "") {
+  async function loadBooks(query = search, page = 1, selectedCategory = category, selectedAvailability = availability) {
     setLoading(true);
     try {
-      const result = await api(`/books/?q=${encodeURIComponent(query)}`);
+      const params = new URLSearchParams({ q: query, page: String(page), category: selectedCategory, availability: selectedAvailability });
+      const result = await api(`/books/?${params}`);
       setBooks(result.results);
+      setCategories(result.categories || []);
+      setPagination(result.pagination);
     } finally {
       setLoading(false);
     }
   }
-  useEffect(() => { loadBooks().catch((error) => noticeText(setNotice, error.message, "error")); }, []);
+  useEffect(() => { loadBooks(search, 1, category, availability).catch((error) => noticeText(setNotice, error.message, "error")); }, []);
 
   async function showAllCopies() {
     try {
@@ -189,20 +200,22 @@ function BooksPage({ setNotice, onAddBook, onOpenBook }) {
     <PageTitle eyebrow="COLLECTION / SEARCH" title="Find a title" note="Search the shelves, then open a title to see every copy and its status." action={<button className="button primary" onClick={onAddBook}>＋ Add a book</button>} />
     <section className="panel search-panel">
       <div className="panel-head"><div><span className="eyebrow">LIBRARY CATALOGUE</span><h3>Search books and authors</h3></div><button className="button light small" type="button" onClick={showAllCopies}>Print all QR labels</button></div>
-      <form className="search-row" onSubmit={(event) => { event.preventDefault(); loadBooks(search).catch((error) => noticeText(setNotice, error.message, "error")); }}><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Type a title or author" /><button className="button light" disabled={loading}>{loading ? "Loading…" : "Search"}</button></form>
-      <p className="route-hint">{loading ? "Loading the collection…" : `${books.length} title${books.length === 1 ? "" : "s"} found · Select a book to open its copy labels.`}</p>
+      <form className="search-row" onSubmit={(event) => { event.preventDefault(); loadBooks(search, 1).catch((error) => noticeText(setNotice, error.message, "error")); }}><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Type a title or author" /><button className="button light" disabled={loading}>{loading ? "Loading…" : "Search"}</button></form>
+      <div className="catalogue-filters"><label>Category<select value={category} onChange={(event) => { const value = event.target.value; setCategory(value); loadBooks(search, 1, value, availability).catch((error) => noticeText(setNotice, error.message, "error")); }}><option value="">All categories</option>{categories.map((item) => <option key={item} value={item}>{item}</option>)}</select></label><label>Availability<select value={availability} onChange={(event) => { const value = event.target.value; setAvailability(value); loadBooks(search, 1, category, value).catch((error) => noticeText(setNotice, error.message, "error")); }}><option value="all">Any status</option><option value="available">Available to borrow</option><option value="unavailable">Unavailable</option></select></label></div>
+      <p className="route-hint">{loading ? "Loading the collection…" : `${pagination.total} title${pagination.total === 1 ? "" : "s"} · Select a book to edit details or open its copy labels.`}</p>
       <div className="catalogue-grid book-catalogue-grid">{books.map((book) => <button type="button" className="catalogue-card book-tile" key={book.id} onClick={() => onOpenBook(book)}>
         <BookCover book={book} />
         <span className="eyebrow">{book.category}</span><h3>{book.title}</h3><p>{book.author}</p><BookRating rating={book.average_rating} count={book.rating_count} />
-        <div className="catalogue-footer"><span>{book.available} / {book.total} copies free</span><small>Shelf {book.shelf || "Unassigned"}</small></div>
+        <div className="catalogue-footer"><span>{book.available_to_borrow} / {book.total} copies free</span><small>Shelf {book.shelf || "Unassigned"}</small></div>
         <span className="book-tile-link">Open copies →</span>
       </button>)}{loading && <p className="empty">Loading titles…</p>}{!loading && books.length === 0 && <p className="empty">No titles found. Try another search or add a new book.</p>}</div>
+      <div className="pagination-controls"><span>Page {pagination.page} of {pagination.pages}</span><div><button className="button light small" disabled={loading || pagination.page <= 1} onClick={() => loadBooks(search, pagination.page - 1).catch((error) => noticeText(setNotice, error.message, "error"))}>← Previous</button><button className="button light small" disabled={loading || pagination.page >= pagination.pages} onClick={() => loadBooks(search, pagination.page + 1).catch((error) => noticeText(setNotice, error.message, "error"))}>Next →</button></div></div>
     </section>
     {copies && <section className="panel qr-panel"><div className="panel-head"><div><span className="eyebrow">PRINTABLE LABELS</span><h3>{copies.title}</h3></div><button className="button light" onClick={() => window.print()}>Print labels</button></div><div className="qr-grid">{copies.results.map((copy) => <article className="qr-card" key={copy.id}><QRCodeSVG value={copy.copy_id} size={120} />{copies.title === "All book copies" && <span>{copy.book_title}</span>}<b>{copy.copy_id}</b><span>{copy.status === "available" ? "Free" : "Allotted"} · {copy.shelf}</span></article>)}</div>{copies.results.length === 0 && <p className="empty">There are no physical copies to label yet.</p>}</section>}
   </>;
 }
 
-function AddBookPage({ setNotice, onSaved, onCancel }) {
+function AddBookPage({ setNotice, onSaved, onCancel, book = null }) {
   const [busy, setBusy] = useState(false);
 
   async function submit(event) {
@@ -210,8 +223,11 @@ function AddBookPage({ setNotice, onSaved, onCancel }) {
     const form = event.currentTarget;
     setBusy(true);
     try {
-      const result = await api("/books/", { method: "POST", body: formBody(Object.fromEntries(new FormData(form))) });
-      noticeText(setNotice, "Book added. Its copy labels are ready to open.");
+      const values = Object.fromEntries(new FormData(form));
+      const result = book
+        ? await api(`/books/${book.id}/`, { method: "POST", body: formBody(values) })
+        : await api("/books/", { method: "POST", body: formBody(values) });
+      noticeText(setNotice, book ? "Book details and copy count updated." : "Book added. Its copy labels are ready to open.");
       onSaved(result.book);
     } catch (error) {
       noticeText(setNotice, error.message, "error");
@@ -221,23 +237,23 @@ function AddBookPage({ setNotice, onSaved, onCancel }) {
   }
 
   return <>
-    <PageTitle eyebrow="LIBRARY CATALOGUE / NEW TITLE" title="Add a book" note="Add the title once, then print a separate QR label for each physical copy." action={<button className="button light" onClick={onCancel}>Back to search</button>} />
+    <PageTitle eyebrow={book ? "LIBRARY CATALOGUE / EDIT TITLE" : "LIBRARY CATALOGUE / NEW TITLE"} title={book ? "Edit a book" : "Add a book"} note={book ? "Update the catalogue record and active physical copy count." : "Add the title once, then print a separate QR label for each physical copy."} action={<button className="button light" onClick={onCancel}>Back to search</button>} />
     <section className="add-book-layout">
       <form className="panel stack-form add-book-form" onSubmit={submit}>
-        <div className="panel-head"><div><span className="eyebrow">BOOK DETAILS</span><h3>New catalogue entry</h3></div></div>
-        <label>Title<input name="title" required maxLength="120" /></label>
-        <label>Author<input name="author" required maxLength="100" /></label>
-        <div className="two-fields"><label>Category<input name="category" required maxLength="40" placeholder="Technology" /></label><label>ISBN<input name="isbn" maxLength="20" /></label></div>
-        <div className="two-fields"><label>Number of copies<input name="copies" type="number" min="0" max="200" defaultValue="1" required /></label><label>Shelf<input name="shelf" maxLength="30" placeholder="A-01" /></label></div>
-        <label>Description<textarea name="description" maxLength="300" rows="4" placeholder="A short note about this title" /></label>
-        <button className="button primary" disabled={busy}>{busy ? "Saving book…" : "Save book"}</button>
+        <div className="panel-head"><div><span className="eyebrow">BOOK DETAILS</span><h3>{book ? "Edit catalogue entry" : "New catalogue entry"}</h3></div></div>
+        <label>Title<input name="title" required maxLength="120" defaultValue={book?.title || ""} /></label>
+        <label>Author<input name="author" required maxLength="100" defaultValue={book?.author || ""} /></label>
+        <div className="two-fields"><label>Category<input name="category" required maxLength="40" placeholder="Technology" defaultValue={book?.category || ""} /></label><label>ISBN<input name="isbn" maxLength="20" defaultValue={book?.isbn || ""} /></label></div>
+        <div className="two-fields"><label>Number of physical copies<input name="copies" type="number" min="0" max="200" defaultValue={book?.total ?? 1} required /><small>Copies currently borrowed or held for pickup cannot be removed.</small></label><label>Shelf<input name="shelf" maxLength="30" placeholder="A-01" defaultValue={book?.shelf || ""} /></label></div>
+        <label>Description<textarea name="description" maxLength="300" rows="4" placeholder="A short note about this title" defaultValue={book?.description || ""} /></label>
+        <button className="button primary" disabled={busy}>{busy ? "Saving book…" : book ? "Save book changes" : "Save book"}</button>
       </form>
       <aside className="add-book-art"><div className="add-book-art-mark" aria-hidden="true"><BookCover book={{ title: "A new chapter", author: "CampusShelf", category: "YOUR COLLECTION" }} /></div><div><span className="eyebrow">ONE TITLE, MANY READERS</span><h3>Give every copy its own place.</h3><p>CampusShelf creates a unique Copy ID for each physical book so checkouts and returns stay tied to the right copy.</p></div></aside>
     </section>
   </>;
 }
 
-function BookDetailPage({ book, setNotice, onBack }) {
+function BookDetailPage({ book, setNotice, onBack, onEdit }) {
   const [copies, setCopies] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -253,7 +269,7 @@ function BookDetailPage({ book, setNotice, onBack }) {
   const shelfLabel = shelfLocations.length ? shelfLocations.join(", ") : book.shelf || "Unassigned";
 
   return <>
-    <PageTitle eyebrow="BOOK DETAILS / PHYSICAL COPIES" title={book.title} note={`${book.author} · ${book.category}`} action={<button className="button light" onClick={onBack}>← Back to titles</button>} />
+    <PageTitle eyebrow="BOOK DETAILS / PHYSICAL COPIES" title={book.title} note={`${book.author} · ${book.category}`} action={<div className="page-title-actions"><button className="button light" onClick={onBack}>← Back to titles</button><button className="button primary" onClick={() => onEdit(book)}>Edit details</button></div>} />
     <section className="book-detail-hero"><div className="detail-cover-wrap"><BookCover book={book} /></div><div><span className="eyebrow">{book.category}</span><h3>{book.title}</h3><p>{book.description || "A title in the CampusShelf collection."}</p><div className="detail-stats"><span><b>{book.total}</b> physical copies</span><span><b>{availableCount}</b> free to borrow</span><span><b>{copies.length - availableCount}</b> on loan</span><span><b>{shelfLocations.length > 1 ? "Shelves" : "Shelf"} {shelfLabel}</b></span></div></div></section>
     <section className="panel"><div className="panel-head"><div><span className="eyebrow">COPY BY COPY</span><h3>QR labels and availability</h3></div><button className="button light" disabled={loading || copies.length === 0} onClick={() => window.print()}>Print these labels</button></div>
       <div className="qr-grid copy-status-grid">{copies.map((copy) => <article className="qr-card copy-status-card" key={copy.id}><QRCodeSVG value={copy.copy_id} size={116} /><span className={`status ${copy.status}`}>{copy.status === "available" ? "Free to borrow" : "Allotted"}</span><b>{copy.copy_id}</b><span>Shelf {copy.shelf || "Unassigned"}</span>{copy.borrowed_to && <span>With {copy.borrowed_to}</span>}{copy.due_at && <span>Due {new Date(copy.due_at).toLocaleDateString()}</span>}{copy.issue_code && <small>Issue {copy.issue_code}</small>}</article>)}</div>
@@ -504,7 +520,7 @@ function ReviewsPage({ setNotice }) {
   async function load() {
     setLoading(true);
     try {
-      const [reviewData, bookData, memberData] = await Promise.all([api("/reviews/"), api("/books/"), api("/members/catalogue/")]);
+      const [reviewData, bookData, memberData] = await Promise.all([api("/reviews/"), api("/books/?page_size=100"), api("/members/catalogue/")]);
       setReviews(reviewData.results);
       setBooks(bookData.results);
       setMembers(memberData.results);
@@ -632,23 +648,95 @@ function IssueSlip({ loan, onClose }) {
   </section>;
 }
 
-function StudentPortal({ user, tab, setNotice, selectedBook, onOpenBook, onBackToBooks, onBookRatingChange }) {
+function ReservationsPage({ setNotice }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  async function load() {
+    setLoading(true);
+    try { setItems((await api("/reservations/")).results); }
+    finally { setLoading(false); }
+  }
+  useEffect(() => { load().catch((error) => noticeText(setNotice, error.message, "error")); }, []);
+  return <>
+    <PageTitle eyebrow="CIRCULATION / HOLDS" title="Book reservations" note="A copy returning to the shelf is assigned to the next student in line." action={<button className="button light" disabled={loading} onClick={() => load().catch((error) => noticeText(setNotice, error.message, "error"))}>Refresh queue</button>} />
+    <section className="panel"><div className="reservation-list">{items.map((item) => <article className="reservation-row" key={item.id}><div className="reservation-mark">{item.status === "ready" ? "✓" : "↗"}</div><div className="reservation-info"><b>{item.book_title}</b><span>{item.author} · Shelf {item.shelf}</span><small>{item.student_name} · {item.student_id} · Placed {new Date(item.created_at).toLocaleDateString()}</small></div><span className={`status ${item.status}`}>{item.status === "ready" ? "Ready for pickup" : item.status}</span></article>)}{loading && <p className="empty">Loading reservations…</p>}{!loading && items.length === 0 && <p className="empty">There are no book holds yet.</p>}</div></section>
+  </>;
+}
+
+function RenewalsPage({ setNotice }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState("");
+  async function load() {
+    setLoading(true);
+    try { setItems((await api("/renewals/")).results); }
+    finally { setLoading(false); }
+  }
+  useEffect(() => { load().catch((error) => noticeText(setNotice, error.message, "error")); }, []);
+  async function review(item, action) {
+    setBusyId(item.id);
+    try {
+      await api(`/renewals/${item.id}/${action}/`, { method: "POST", body: formBody({}) });
+      await load();
+      noticeText(setNotice, `Renewal ${action === "approve" ? "approved" : "declined"}.`);
+    } catch (error) { noticeText(setNotice, error.message, "error"); }
+    finally { setBusyId(""); }
+  }
+  return <>
+    <PageTitle eyebrow="CIRCULATION / RENEWALS" title="Renewal requests" note="Approve one 14-day extension when the loan is current and no other student is waiting for the title." action={<button className="button light" disabled={loading} onClick={() => load().catch((error) => noticeText(setNotice, error.message, "error"))}>Refresh requests</button>} />
+    <section className="panel"><div className="reservation-list">{items.map((item) => <article className="reservation-row" key={item.id}><div className="reservation-mark">↻</div><div className="reservation-info"><b>{item.book_title}</b><span>{item.student_name} · {item.student_id} · Copy {item.copy_id}</span><small>Requested {new Date(item.created_at).toLocaleDateString()} · Due {new Date(item.due_at).toLocaleDateString()} · {item.issue_code}</small></div><span className={`status ${item.status}`}>{item.status}</span>{item.status === "pending" && <div className="row-actions"><button className="button primary small" disabled={Boolean(busyId)} onClick={() => review(item, "approve")}>{busyId === item.id ? "Saving…" : "Approve +14 days"}</button><button className="button danger small" disabled={Boolean(busyId)} onClick={() => review(item, "reject")}>Decline</button></div>}</article>)}{loading && <p className="empty">Loading renewal requests…</p>}{!loading && items.length === 0 && <p className="empty">No renewal requests yet.</p>}</div></section>
+  </>;
+}
+
+function ReportsPage({ setNotice }) {
+  const [report, setReport] = useState(null);
+  const [loading, setLoading] = useState(true);
+  async function load() {
+    setLoading(true);
+    try { setReport(await api("/reports/")); }
+    finally { setLoading(false); }
+  }
+  useEffect(() => { load().catch((error) => noticeText(setNotice, error.message, "error")); }, []);
+  const maxPopular = Math.max(1, ...(report?.popular_books || []).map((item) => item.borrowings));
+  const maxMonth = Math.max(1, ...(report?.circulation || []).flatMap((item) => [item.issues, item.returns]));
+  return <>
+    <PageTitle eyebrow="LIBRARY ANALYTICS" title="Circulation reports" note="See which titles readers choose and how borrowing activity changes over six months." action={<button className="button light" disabled={loading} onClick={() => load().catch((error) => noticeText(setNotice, error.message, "error"))}>Refresh report</button>} />
+    {report && <div className="stats-grid report-stats"><StatCard label="Lifetime checkouts" value={report.totals.borrowings} note="All recorded issue transactions" /><StatCard label="Currently borrowed" value={report.totals.active} note="Active circulation" /><StatCard label="Completed returns" value={report.totals.returned} note="Returned to the collection" /></div>}
+    <div className="reports-grid"><section className="panel"><div className="panel-head"><div><span className="eyebrow">MOST BORROWED</span><h3>Popular titles</h3></div></div><div className="report-rank-list">{report?.popular_books.map((item, index) => <div className="report-rank" key={item.title}><span>{String(index + 1).padStart(2, "0")}</span><div><b>{item.title}</b><div className="report-bar"><i style={{ width: `${Math.max(5, item.borrowings / maxPopular * 100)}%` }} /></div></div><strong>{item.borrowings}</strong></div>)}{loading && <p className="empty">Loading popular titles…</p>}{!loading && !report?.popular_books.length && <p className="empty">Borrowing history will appear here.</p>}</div></section>
+      <section className="panel"><div className="panel-head"><div><span className="eyebrow">LAST SIX MONTHS</span><h3>Borrowing activity</h3></div></div><div className="circulation-chart">{report?.circulation.map((month) => <div className="circulation-month" key={month.month}><div className="circulation-bars"><i className="issue-bar" title={`${month.issues} checkouts`} style={{ height: `${Math.max(3, month.issues / maxMonth * 100)}%` }} /><i className="return-bar" title={`${month.returns} returns`} style={{ height: `${Math.max(3, month.returns / maxMonth * 100)}%` }} /></div><small>{month.label}</small></div>)}{loading && <p className="empty">Loading monthly activity…</p>}</div><div className="chart-legend"><span><i className="issue-bar" /> Checkouts</span><span><i className="return-bar" /> Returns</span></div></section></div>
+    <section className="panel"><div className="panel-head"><div><span className="eyebrow">LATEST ACTIVITY</span><h3>Recent transactions</h3></div></div><div className="table-scroll"><table><thead><tr><th>Issue ID</th><th>Title</th><th>Student</th><th>Issued</th><th>Due</th><th>Status</th></tr></thead><tbody>{report?.recent_transactions.map((item) => <tr key={item.issue_code}><td><code>{item.issue_code}</code></td><td>{item.book_title}</td><td>{item.student_name}<small>{item.student_id}</small></td><td>{new Date(item.borrowed_at).toLocaleDateString()}</td><td>{new Date(item.due_at).toLocaleDateString()}</td><td><span className={`status ${item.status}`}>{item.status}</span></td></tr>)}</tbody></table></div>{loading && <p className="empty">Loading recent transactions…</p>}{!loading && !report?.recent_transactions.length && <p className="empty">There are no transactions yet.</p>}</section>
+  </>;
+}
+
+function StudentPortal({ user, tab, setTab, setNotice, selectedBook, onOpenBook, onBackToBooks, onBookRatingChange }) {
   const [books, setBooks] = useState([]);
   const [loans, setLoans] = useState([]);
+  const [holds, setHolds] = useState([]);
   const [fines, setFines] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("");
+  const [availability, setAvailability] = useState("all");
+  const [categories, setCategories] = useState([]);
+  const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 });
   const [copyId, setCopyId] = useState("");
   const [copyInfo, setCopyInfo] = useState(null);
   const [scanOpen, setScanOpen] = useState(false);
   const [slip, setSlip] = useState(null);
 
-  async function load(searchTerm = query) {
+  async function load(searchTerm = query, pageNumber = 1, selectedCategory = category, selectedAvailability = availability) {
     setLoading(true);
     try {
-      if (tab === "catalogue") setBooks((await api(`/catalogue/?q=${encodeURIComponent(searchTerm)}`)).results);
+      if (tab === "catalogue") {
+        const params = new URLSearchParams({ q: searchTerm, page: String(pageNumber), category: selectedCategory, availability: selectedAvailability });
+        const result = await api(`/catalogue/?${params}`);
+        setBooks(result.results);
+        setCategories(result.categories || []);
+        setPagination(result.pagination);
+      }
       if (tab === "my_loans") setLoans((await api("/student/loans/")).results);
+      if (tab === "my_holds") setHolds((await api("/student/reservations/")).results);
       if (tab === "my_fines") setFines((await api("/fines/")).results);
     } finally {
       setLoading(false);
@@ -684,7 +772,40 @@ function StudentPortal({ user, tab, setNotice, selectedBook, onOpenBook, onBackT
 
   async function search(event) {
     event.preventDefault();
-    try { await load(query); } catch (error) { noticeText(setNotice, error.message, "error"); }
+    try { await load(query, 1); } catch (error) { noticeText(setNotice, error.message, "error"); }
+  }
+
+  async function reserveBook(bookId) {
+    setBusy(true);
+    try {
+      const result = await api("/student/reservations/", { method: "POST", body: formBody({ book_id: bookId }) });
+      noticeText(setNotice, `Reservation ${result.reservation.status === "ready" ? "ready for pickup" : "added to the queue"}.`);
+      setTab("my_holds");
+    } catch (error) {
+      noticeText(setNotice, error.message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cancelHold(hold) {
+    try {
+      await api(`/student/reservations/${hold.id}/cancel/`, { method: "POST", body: formBody({}) });
+      await load();
+      noticeText(setNotice, "Reservation cancelled.");
+    } catch (error) {
+      noticeText(setNotice, error.message, "error");
+    }
+  }
+
+  async function requestRenewal(loan) {
+    try {
+      await api("/student/renewals/", { method: "POST", body: formBody({ loan_id: loan.id }) });
+      await load();
+      noticeText(setNotice, "Renewal request sent to the library.");
+    } catch (error) {
+      noticeText(setNotice, error.message, "error");
+    }
   }
 
   function openIssueSlip(loan) {
@@ -696,7 +817,10 @@ function StudentPortal({ user, tab, setNotice, selectedBook, onOpenBook, onBackT
     <section className="student-welcome"><div><span className="eyebrow">YOUR CAMPUS LIBRARY</span><h2>Hello, {user.name.split(" ")[0]}.</h2><p>Find a title that interests you, then check out the exact copy from its QR label.</p></div><div className="welcome-mark" aria-hidden="true"><span>YOUR NEXT</span><b>read</b><span>STARTS HERE</span></div></section>
     {slip && <IssueSlip loan={slip} onClose={() => setSlip(null)} />}
     <section className="panel"><div className="panel-head"><div><span className="eyebrow">COLLECTION</span><h3>Search the shelves</h3></div></div><form className="search-row" onSubmit={search}><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search books or authors" /><button className="button light" disabled={loading}>{loading ? "Loading…" : "Search"}</button></form>
-      <div className="catalogue-grid book-catalogue-grid">{books.map((book) => <button type="button" className="catalogue-card book-tile" key={book.id} onClick={() => onOpenBook(book)}><BookCover book={book} /><span className="eyebrow">{book.category}</span><h3>{book.title}</h3><p>{book.author}</p><BookRating rating={book.average_rating} count={book.rating_count} /><div className="catalogue-footer"><span>{book.available} copies free</span><small>Shelf {book.shelf || "Unassigned"}</small></div><span className="book-tile-link">View title <span aria-hidden="true">↗</span></span></button>)}{loading && <p className="empty">Loading books…</p>}{!loading && books.length === 0 && <p className="empty">No books match that search.</p>}</div>
+      <div className="catalogue-filters"><label>Category<select value={category} onChange={(event) => { const value = event.target.value; setCategory(value); load(query, 1, value, availability).catch((error) => noticeText(setNotice, error.message, "error")); }}><option value="">All categories</option>{categories.map((item) => <option key={item} value={item}>{item}</option>)}</select></label><label>Availability<select value={availability} onChange={(event) => { const value = event.target.value; setAvailability(value); load(query, 1, category, value).catch((error) => noticeText(setNotice, error.message, "error")); }}><option value="all">Any status</option><option value="available">Available now</option><option value="unavailable">Join the hold queue</option></select></label></div>
+      <p className="route-hint">{pagination.total} titles in this view</p>
+      <div className="catalogue-grid book-catalogue-grid">{books.map((book) => <button type="button" className="catalogue-card book-tile" key={book.id} onClick={() => onOpenBook(book)}><BookCover book={book} /><span className="eyebrow">{book.category}</span><h3>{book.title}</h3><p>{book.author}</p><BookRating rating={book.average_rating} count={book.rating_count} /><div className="catalogue-footer"><span>{book.available_to_borrow} copies available</span><small>Shelf {book.shelf || "Unassigned"}</small></div><span className="book-tile-link">View title <span aria-hidden="true">↗</span></span></button>)}{loading && <p className="empty">Loading books…</p>}{!loading && books.length === 0 && <p className="empty">No books match that search.</p>}</div>
+      <div className="pagination-controls"><span>Page {pagination.page} of {pagination.pages}</span><div><button className="button light small" disabled={loading || pagination.page <= 1} onClick={() => load(query, pagination.page - 1).catch((error) => noticeText(setNotice, error.message, "error"))}>← Previous</button><button className="button light small" disabled={loading || pagination.page >= pagination.pages} onClick={() => load(query, pagination.page + 1).catch((error) => noticeText(setNotice, error.message, "error"))}>Next →</button></div></div>
     </section>
     <section className="panel scan-student"><div><span className="eyebrow">READY TO BORROW</span><h3>Scan your copy</h3><p>Sign in first, scan the QR label, and confirm the issue. You can borrow up to five books.</p><button className="button primary" disabled={busy} onClick={() => setScanOpen((open) => !open)}>{scanOpen ? "Close camera" : "Open QR scanner"}</button></div><div className="scan-side">{copyInfo ? <><b>{copyInfo.book_title}</b><span>{copyInfo.copy_id}</span><span className={`status ${copyInfo.status}`}>{copyInfo.status}</span>{copyInfo.status === "available" && <button className="button dark" disabled={busy} onClick={issueCopy}>{busy ? "Checking out…" : "Confirm checkout"}</button>}</> : <span className="scan-symbol">⌗</span>}</div></section>
     <Scanner open={scanOpen} onScan={scanned} onError={(message) => noticeText(setNotice, message, "error")} />
@@ -704,15 +828,20 @@ function StudentPortal({ user, tab, setNotice, selectedBook, onOpenBook, onBackT
 
   if (tab === "student_book") return <>
     <PageTitle eyebrow="STUDENT CATALOGUE / TITLE DETAILS" title={selectedBook.title} note={`${selectedBook.author} · ${selectedBook.category}`} action={<button className="button light" onClick={onBackToBooks}>← Back to books</button>} />
-    <section className="book-detail-hero"><div className="detail-cover-wrap"><BookCover book={selectedBook} /></div><div><span className="eyebrow">{selectedBook.category}</span><h3>{selectedBook.title}</h3><p>{selectedBook.description || "Find this title on the library shelves."}</p><BookRating rating={selectedBook.average_rating} count={selectedBook.rating_count} /><div className="detail-stats"><span><b>{selectedBook.available}</b> copies free to borrow</span><span><b>{selectedBook.total}</b> copies in the library</span><span>Shelf <b>{selectedBook.shelf || "Unassigned"}</b></span></div></div></section>
-    <section className="panel detail-next-step"><span className="eyebrow">READY TO BORROW</span><h3>Scan the QR on your chosen copy</h3><p>Go back to the catalogue to open the scanner. The librarian scans the same copy QR when you return it.</p><button className="button primary" onClick={onBackToBooks}>Back to catalogue and scanner</button></section>
+    <section className="book-detail-hero"><div className="detail-cover-wrap"><BookCover book={selectedBook} /></div><div><span className="eyebrow">{selectedBook.category}</span><h3>{selectedBook.title}</h3><p>{selectedBook.description || "Find this title on the library shelves."}</p><BookRating rating={selectedBook.average_rating} count={selectedBook.rating_count} /><div className="detail-stats"><span><b>{selectedBook.available_to_borrow}</b> copies free to borrow</span><span><b>{selectedBook.total}</b> copies in the library</span><span>Shelf <b>{selectedBook.shelf || "Unassigned"}</b></span></div></div></section>
+    <section className="panel detail-next-step"><span className="eyebrow">{selectedBook.available_to_borrow > 0 ? "READY TO BORROW" : "RESERVATION QUEUE"}</span><h3>{selectedBook.available_to_borrow > 0 ? "Scan the QR on your chosen copy" : "Get in line for the next copy"}</h3><p>{selectedBook.available_to_borrow > 0 ? "Go back to the catalogue to open the scanner. The librarian scans the same copy QR when you return it." : "We’ll mark your hold ready as soon as a copy is available."}</p>{selectedBook.available_to_borrow > 0 ? <button className="button primary" onClick={onBackToBooks}>Back to catalogue and scanner</button> : <button className="button primary" disabled={busy} onClick={() => reserveBook(selectedBook.id)}>{busy ? "Adding hold…" : "Reserve this book"}</button>}</section>
     <StudentBookReviews key={selectedBook.id} book={selectedBook} setNotice={setNotice} onRatingChange={onBookRatingChange} />
   </>;
 
   if (tab === "my_loans") return <>
     <PageTitle eyebrow="STUDENT PORTAL / CIRCULATION" title="My loans" note="Your active issues and return dates." />
     {slip && <IssueSlip loan={slip} onClose={() => setSlip(null)} />}
-    <section className="panel"><div className="table-scroll"><table><thead><tr><th>Book</th><th>Copy ID</th><th>Issue ID</th><th>Due date</th><th>Fine today</th><th>Status</th><th>Slip / return QR</th></tr></thead><tbody>{loans.map((loan) => <tr key={loan.id}><td><b>{loan.book_title}</b><small>{loan.book_author}</small></td><td><code>{loan.copy_id}</code></td><td><code>{loan.issue_code}</code></td><td>{new Date(loan.due_at).toLocaleDateString()}</td><td>{loan.current_fine === "0" ? "—" : `₹${loan.current_fine}`}</td><td><span className={`status ${loan.status}`}>{loan.status}</span></td><td><button className="button light small" onClick={() => openIssueSlip(loan)}>{loan.status === "borrowed" ? "Open return QR & slip" : "Open issue slip"}</button></td></tr>)}</tbody></table></div>{loading && <p className="empty">Loading your loans…</p>}{!loading && loans.length === 0 && <p className="empty">You do not have any loans yet.</p>}</section>
+    <section className="panel"><div className="table-scroll"><table><thead><tr><th>Book</th><th>Copy ID</th><th>Issue ID</th><th>Due date</th><th>Fine today</th><th>Status</th><th>Renewal</th><th>Slip / return QR</th></tr></thead><tbody>{loans.map((loan) => <tr key={loan.id}><td><b>{loan.book_title}</b><small>{loan.book_author}</small></td><td><code>{loan.copy_id}</code></td><td><code>{loan.issue_code}</code></td><td>{new Date(loan.due_at).toLocaleDateString()}</td><td>{loan.current_fine === "0" ? "—" : `₹${loan.current_fine}`}</td><td><span className={`status ${loan.status}`}>{loan.status}</span></td><td>{loan.renewal_status === "pending" ? <span className="status pending">In review</span> : loan.renewal_status === "approved" ? <span className="status approved">Renewed</span> : loan.renewal_status === "rejected" ? <span className="renewal-rejected"><span className="status rejected">Declined</span>{loan.renewal_allowed && <button className="button light small" onClick={() => requestRenewal(loan)}>Request again</button>}</span> : loan.renewal_allowed ? <button className="button light small" onClick={() => requestRenewal(loan)}>Request renewal</button> : "—"}</td><td><button className="button light small" onClick={() => openIssueSlip(loan)}>{loan.status === "borrowed" ? "Open return QR & slip" : "Open issue slip"}</button></td></tr>)}</tbody></table></div>{loading && <p className="empty">Loading your loans…</p>}{!loading && loans.length === 0 && <p className="empty">You do not have any loans yet.</p>}</section>
+  </>;
+
+  if (tab === "my_holds") return <>
+    <PageTitle eyebrow="STUDENT PORTAL / RESERVATIONS" title="My holds" note="Follow your place in line and see when a copy is ready for pickup." />
+    <section className="panel"><div className="reservation-list">{holds.map((hold) => <article className="reservation-row" key={hold.id}><div className="reservation-mark">{hold.status === "ready" ? "✓" : "↗"}</div><div className="reservation-info"><b>{hold.book_title}</b><span>{hold.author} · Shelf {hold.shelf}</span><small>Placed {new Date(hold.created_at).toLocaleDateString()}{hold.status === "waiting" && hold.queue_position ? ` · Queue position ${hold.queue_position}` : ""}</small></div><span className={`status ${hold.status}`}>{hold.status === "ready" ? "Ready for pickup" : hold.status}</span>{["waiting", "ready"].includes(hold.status) && <button className="button light small" onClick={() => cancelHold(hold)}>Cancel hold</button>}</article>)}{loading && <p className="empty">Loading your reservations…</p>}{!loading && holds.length === 0 && <p className="empty">No holds yet. Reserve a title from its details page when all copies are in use.</p>}</div></section>
   </>;
 
   return <>
@@ -781,17 +910,21 @@ export default function App() {
 
   const isStudent = user.role === "student";
   const tabs = isStudent ? studentTabs : librarianTabs;
-  const activeTab = tab === "book_detail" || tab === "add_book" ? "books" : tab === "student_book" ? "catalogue" : tab;
+  const activeTab = tab === "book_detail" || tab === "add_book" || tab === "edit_book" ? "books" : tab === "student_book" ? "catalogue" : tab;
   const active = tabs.find((item) => item[0] === activeTab) || tabs[0];
   let content;
   if (tab === "account") content = <AccountPage user={user} setNotice={setNotice} />;
-  else if (isStudent) content = <StudentPortal key={tab} user={user} tab={tab} setNotice={setNotice} selectedBook={selectedBook} onOpenBook={(book) => { setSelectedBook(book); setTab("student_book"); }} onBackToBooks={() => setTab("catalogue")} onBookRatingChange={(ratings) => setSelectedBook((book) => book ? { ...book, ...ratings } : book)} />;
+  else if (isStudent) content = <StudentPortal key={tab} user={user} tab={tab} setTab={setTab} setNotice={setNotice} selectedBook={selectedBook} onOpenBook={(book) => { setSelectedBook(book); setTab("student_book"); }} onBackToBooks={() => setTab("catalogue")} onBookRatingChange={(ratings) => setSelectedBook((book) => book ? { ...book, ...ratings } : book)} />;
   else if (tab === "overview") content = <Dashboard setNotice={setNotice} onNavigate={setTab} />;
   else if (tab === "books") content = <BooksPage setNotice={setNotice} onAddBook={() => setTab("add_book")} onOpenBook={(book) => { setSelectedBook(book); setTab("book_detail"); }} />;
   else if (tab === "add_book") content = <AddBookPage setNotice={setNotice} onCancel={() => setTab("books")} onSaved={(book) => { setSelectedBook(book); setTab("book_detail"); }} />;
-  else if (tab === "book_detail" && selectedBook) content = <BookDetailPage key={selectedBook.id} book={selectedBook} setNotice={setNotice} onBack={() => setTab("books")} />;
+  else if (tab === "edit_book" && selectedBook) content = <AddBookPage key={`edit-${selectedBook.id}`} book={selectedBook} setNotice={setNotice} onCancel={() => setTab("book_detail")} onSaved={(book) => { setSelectedBook(book); setTab("book_detail"); }} />;
+  else if (tab === "book_detail" && selectedBook) content = <BookDetailPage key={selectedBook.id} book={selectedBook} setNotice={setNotice} onBack={() => setTab("books")} onEdit={(book) => { setSelectedBook(book); setTab("edit_book"); }} />;
   else if (tab === "book_detail") content = <BooksPage setNotice={setNotice} onAddBook={() => setTab("add_book")} onOpenBook={(book) => { setSelectedBook(book); setTab("book_detail"); }} />;
   else if (tab === "requests") content = <RequestsPage setNotice={setNotice} />;
+  else if (tab === "reservations") content = <ReservationsPage setNotice={setNotice} />;
+  else if (tab === "renewals") content = <RenewalsPage setNotice={setNotice} />;
+  else if (tab === "reports") content = <ReportsPage setNotice={setNotice} />;
   else if (tab === "students") content = <StudentsPage setNotice={setNotice} />;
   else if (tab === "loans") content = <LoansPage setNotice={setNotice} />;
   else if (tab === "fines") content = <FinesPage setNotice={setNotice} />;

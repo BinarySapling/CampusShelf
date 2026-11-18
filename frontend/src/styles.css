@@ -207,8 +207,9 @@ td b { color: #34453a; font-weight: 700; }
 td small { margin-top: 4px; color: #939b92; font-size: 8px; }
 code { padding: 4px 6px; border: 1px solid #e6e8df; border-radius: 5px; background: #f4f5ef; color: #45614c; font-size: 8px; }
 .status { display: inline-flex; align-items: center; padding: 6px 8px; border-radius: 20px; background: #f0f1ed; color: #69736b; font-size: 8px; font-weight: 800; text-transform: capitalize; white-space: nowrap; }
-.status.approved, .status.available, .status.paid { background: var(--green-soft); color: #3f7453; }
+.status.approved, .status.available, .status.paid, .status.ready, .status.fulfilled { background: var(--green-soft); color: #3f7453; }
 .status.pending, .status.unpaid, .status.borrowed { background: var(--gold-soft); color: #99723d; }
+.status.waiting { background: var(--gold-soft); color: #99723d; }
 .status.rejected, .status.returned { background: #efefeb; color: #777f77; }
 .request-list, .fine-list, .review-list { display: grid; }
 .request-row, .fine-row { display: flex; align-items: center; gap: 13px; padding: 14px 0; border-top: 1px solid #eeeee8; }
@@ -420,6 +421,45 @@ code { padding: 4px 6px; border: 1px solid #e6e8df; border-radius: 5px; backgrou
   .book-tile { min-height: 258px; }
   .book-cover-visual { min-height: 104px; }
   .auth-links { align-items: flex-start; flex-direction: column; }
+}
+.catalogue-filters { display: flex; flex-wrap: wrap; gap: 12px; margin: 0 0 14px; }
+.catalogue-filters label { display: grid; min-width: 180px; gap: 6px; color: #68756b; font-size: 9px; font-weight: 700; }
+.catalogue-filters select { min-height: 38px; padding: 8px 11px; border: 1px solid #dfe3da; border-radius: 8px; background: #fff; color: var(--ink); font-size: 10px; }
+.pagination-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 18px; padding-top: 14px; border-top: 1px solid #eeeee8; color: var(--muted); font-size: 10px; }
+.pagination-controls > div, .page-title-actions { display: flex; align-items: center; gap: 8px; }
+.page-title-actions { flex-wrap: wrap; justify-content: flex-end; }
+.renewal-rejected { display: inline-flex; align-items: center; gap: 6px; }
+.reservation-list { display: grid; }
+.reservation-row { display: flex; align-items: center; gap: 13px; padding: 15px 0; border-top: 1px solid #eeeee8; }
+.reservation-mark { display: grid; width: 35px; height: 35px; flex: 0 0 auto; place-items: center; border-radius: 50%; background: var(--green-soft); color: var(--green); font-size: 17px; font-weight: 700; }
+.reservation-info { display: grid; min-width: 0; flex: 1; gap: 4px; }
+.reservation-info b { font-size: 11px; }
+.reservation-info span, .reservation-info small { color: #7b857c; font-size: 9px; }
+.reports-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 15px; margin: 15px 0; }
+.report-stats { margin: 0 0 15px; }
+.report-rank-list { display: grid; }
+.report-rank { display: grid; grid-template-columns: 27px minmax(0, 1fr) 30px; align-items: center; gap: 10px; padding: 11px 0; border-top: 1px solid #f0f0e9; }
+.report-rank > span { color: #9ca398; font: 400 16px var(--display); }
+.report-rank b { display: block; overflow: hidden; margin-bottom: 7px; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.report-rank > strong { color: var(--green); font-size: 11px; text-align: right; }
+.report-bar { height: 5px; overflow: hidden; border-radius: 5px; background: #edf0e8; }
+.report-bar i { display: block; height: 100%; border-radius: inherit; background: #63866d; }
+.circulation-chart { display: grid; height: 190px; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; align-items: stretch; padding: 9px 0 0; }
+.circulation-month { display: flex; min-width: 0; flex-direction: column; align-items: center; justify-content: flex-end; gap: 9px; }
+.circulation-bars { display: flex; width: 100%; height: 100%; align-items: flex-end; justify-content: center; gap: 4px; border-bottom: 1px solid #e6e8df; }
+.circulation-bars i { width: min(22px, 32%); min-height: 3px; border-radius: 4px 4px 0 0; }
+.issue-bar { background: #63866d; }
+.return-bar { background: #d8ad73; }
+.circulation-month small { min-height: 22px; color: #778178; font-size: 8px; text-align: center; }
+.chart-legend { display: flex; gap: 16px; margin-top: 7px; color: #778178; font-size: 9px; }
+.chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.chart-legend i { width: 8px; height: 8px; border-radius: 50%; }
+@media (max-width: 760px) {
+  .reports-grid { grid-template-columns: 1fr; }
+  .reservation-row { align-items: flex-start; flex-wrap: wrap; }
+  .reservation-info { flex-basis: calc(100% - 55px); }
+  .reservation-row > .status, .reservation-row > .button { margin-left: 48px; }
+  .page-title-actions { justify-content: flex-start; }
 }
 @media print {
   body { background: #fff; }

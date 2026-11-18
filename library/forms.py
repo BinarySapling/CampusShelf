@@ -21,7 +21,10 @@ class BookForm(forms.ModelForm):
 
     def clean_isbn(self):
         isbn = self.cleaned_data.get("isbn", "").strip()
-        if isbn and Book.objects.filter(isbn=isbn).exists():
+        matching_books = Book.objects.filter(isbn=isbn) if isbn else Book.objects.none()
+        if self.instance and self.instance.pk:
+            matching_books = matching_books.exclude(pk=self.instance.pk)
+        if isbn and matching_books.exists():
             raise forms.ValidationError("That ISBN already exists. Use a unique ISBN.")
         return isbn or None
 
@@ -134,6 +137,14 @@ class IssueIdForm(forms.Form):
 
 class StudentIssueForm(forms.Form):
     copy_id = forms.CharField(max_length=28)
+
+
+class BookReservationForm(forms.Form):
+    book_id = forms.CharField(max_length=32)
+
+
+class LoanRenewalRequestForm(forms.Form):
+    loan_id = forms.CharField(max_length=32)
 
 
 class ManualIssueForm(forms.Form):

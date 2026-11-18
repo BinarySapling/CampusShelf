@@ -1,3 +1,5 @@
+from collections import Counter, defaultdict
+from datetime import datetime, timedelta
 from functools import wraps
 
 from bson import ObjectId
@@ -15,17 +17,19 @@ from django.views.decorators.http import require_GET, require_POST
 
 from .forms import (
     BookForm,
+    BookReservationForm,
     CustomFineForm,
     FirstLibrarianForm,
     LibrarianForm,
     LoginForm,
+    LoanRenewalRequestForm,
     ManualIssueForm,
     ReviewForm,
     StudentIssueForm,
     StudentReviewForm,
     StudentSignupForm,
 )
-from .models import Book, BookCopy, Borrowing, FineEntry, Member, Review, StudentSignupRequest
+from .models import Book, BookCopy, BookReservation, Borrowing, FineEntry, LoanRenewalRequest, Member, Review, StudentSignupRequest
 from .views import (
     LIBRARIAN_GROUP,
     STUDENT_GROUP,
@@ -35,7 +39,10 @@ from .views import (
     create_borrowing,
     make_staff_id,
     overdue_fine,
+    promote_available_reservations,
     to_object_id,
+    update_book_stock,
+    checkout_hold_error,
 )
 
 
@@ -130,7 +137,9 @@ def book_ratings_for_books(books):
 
 
 def book_data(book, rating_summary=None):
-    copies = list(BookCopy.objects.filter(book=book))
+    copies = list(BookCopy.objects.filter(book=book).exclude(status=BookCopy.RETIRED))
+    available = sum(copy.status == BookCopy.AVAILABLE for copy in copies)
+    ready_reservations = BookReservation.objects.filter(book=book, status=BookReservation.READY).count()
     rating_summary = rating_summary or {"average_rating": 0, "rating_count": 0}
     return {
         "id": str(book.pk),
@@ -140,7 +149,8 @@ def book_data(book, rating_summary=None):
         "isbn": book.isbn or "",
         "shelf": book.shelf,
         "description": book.description,
-        "available": sum(copy.status == BookCopy.AVAILABLE for copy in copies),
+        "available": available,
+        "available_to_borrow": max(0, available - ready_reservations),
         "total": len(copies),
         "average_rating": rating_summary["average_rating"],
         "rating_count": rating_summary["rating_count"],
@@ -149,6 +159,12 @@ def book_data(book, rating_summary=None):
 
 def borrowing_data(record):
     days, amount = overdue_fine(record) if record.status == Borrowing.BORROWED else (0, 0)
+    renewal = LoanRenewalRequest.objects.filter(borrowing=record).order_by("-created_at").first()
+    renewed = LoanRenewalRequest.objects.filter(borrowing=record, status=LoanRenewalRequest.APPROVED).exists()
+    other_holds = record.book_id and BookReservation.objects.filter(
+        book_id=record.book_id,
+        status__in=[BookReservation.WAITING, BookReservation.READY],
+    ).exclude(member_id=record.member_id).exists()
     return {
         "id": str(record.pk),
         "issue_code": record.issue_code,
@@ -166,7 +182,54 @@ def borrowing_data(record):
         "returned_at": record.returned_at.isoformat() if record.returned_at else "",
         "overdue_days": days,
         "current_fine": str(amount),
+        "renewal_status": renewal.status if renewal else "",
+        "renewal_allowed": record.status == Borrowing.BORROWED and not renewed and not days and not other_holds and (not renewal or renewal.status != LoanRenewalRequest.PENDING),
     }
+
+
+def paginated_books(request, queryset):
+    query = request.GET.get("q", "").strip()
+    category = request.GET.get("category", "").strip()
+    availability = request.GET.get("availability", "all").strip()
+    if query:
+        queryset = queryset.filter(Q(title__icontains=query) | Q(author__icontains=query))
+    if category:
+        queryset = queryset.filter(category=category)
+    try:
+        page_number = max(1, int(request.GET.get("page", "1")))
+    except ValueError:
+        page_number = 1
+    try:
+        page_size = min(100, max(1, int(request.GET.get("page_size", "24"))))
+    except ValueError:
+        page_size = 24
+    if availability not in ("available", "unavailable"):
+        total = queryset.count()
+        pages = max(1, (total + page_size - 1) // page_size)
+        page_number = min(page_number, pages)
+        start = (page_number - 1) * page_size
+        books = list(queryset[start:start + page_size])
+        ratings = book_ratings_for_books(books)
+        results = [book_data(book, ratings[str(book.pk)]) for book in books]
+    else:
+        books = list(queryset)
+        ratings = book_ratings_for_books(books)
+        results = [book_data(book, ratings[str(book.pk)]) for book in books]
+        if availability == "available":
+            results = [book for book in results if book["available_to_borrow"] > 0]
+        else:
+            results = [book for book in results if book["available_to_borrow"] == 0]
+        total = len(results)
+        pages = max(1, (total + page_size - 1) // page_size)
+        page_number = min(page_number, pages)
+        start = (page_number - 1) * page_size
+        results = results[start:start + page_size]
+    categories = sorted(set(Book.objects.exclude(category="").values_list("category", flat=True)))
+    return JsonResponse({
+        "results": results,
+        "categories": categories,
+        "pagination": {"page": page_number, "page_size": page_size, "total": total, "pages": pages},
+    })
 
 
 def fine_data(entry):
@@ -180,6 +243,45 @@ def fine_data(entry):
         "status": entry.status,
         "created_at": entry.created_at.isoformat(),
         "paid_at": entry.paid_at.isoformat() if entry.paid_at else "",
+    }
+
+
+def reservation_data(reservation):
+    queue_position = None
+    if reservation.status == BookReservation.WAITING:
+        queue_position = BookReservation.objects.filter(
+            book=reservation.book,
+            status=BookReservation.WAITING,
+            created_at__lte=reservation.created_at,
+        ).count()
+    return {
+        "id": str(reservation.pk),
+        "book_id": str(reservation.book_id),
+        "book_title": reservation.book_title,
+        "author": reservation.book.author,
+        "shelf": reservation.book.shelf or "Unassigned",
+        "student_id": reservation.member.student_id,
+        "student_name": reservation.member.name,
+        "status": reservation.status,
+        "queue_position": queue_position,
+        "created_at": reservation.created_at.isoformat(),
+        "updated_at": reservation.updated_at.isoformat(),
+    }
+
+
+def renewal_data(item):
+    return {
+        "id": str(item.pk),
+        "loan_id": str(item.borrowing_id),
+        "issue_code": item.borrowing.issue_code,
+        "book_title": item.borrowing.book_title,
+        "copy_id": item.borrowing.copy_id,
+        "student_id": item.member.student_id,
+        "student_name": item.member.name,
+        "status": item.status,
+        "due_at": item.borrowing.due_at.isoformat(),
+        "created_at": item.created_at.isoformat(),
+        "reviewed_at": item.reviewed_at.isoformat() if item.reviewed_at else "",
     }
 
 
@@ -416,25 +518,13 @@ def members_list(request):
 
 @require_GET
 def catalogue(request):
-    query = request.GET.get("q", "").strip()
-    books = Book.objects.all()
-    if query:
-        books = books.filter(Q(title__icontains=query) | Q(author__icontains=query))
-    books = list(books[:100])
-    ratings = book_ratings_for_books(books)
-    return JsonResponse({"results": [book_data(book, ratings[str(book.pk)]) for book in books]})
+    return paginated_books(request, Book.objects.all())
 
 
 @librarian_api
 def books_api(request):
     if request.method == "GET":
-        query = request.GET.get("q", "").strip()
-        books = Book.objects.all()
-        if query:
-            books = books.filter(Q(title__icontains=query) | Q(author__icontains=query))
-        books = list(books[:200])
-        ratings = book_ratings_for_books(books)
-        return JsonResponse({"results": [book_data(book, ratings[str(book.pk)]) for book in books]})
+        return paginated_books(request, Book.objects.all())
     if request.method != "POST":
         return JsonResponse({"error": "Use GET or POST."}, status=405)
 
@@ -459,11 +549,67 @@ def books_api(request):
 
 
 @librarian_api
+@require_POST
+def edit_book(request, book_id):
+    object_id = to_object_id(book_id)
+    book = Book.objects.filter(pk=object_id).first() if object_id else None
+    if not book:
+        return JsonResponse({"error": "Book not found."}, status=404)
+    form = BookForm(request.POST, instance=book)
+    if not form.is_valid():
+        return JsonResponse({"errors": form_errors(form)}, status=400)
+
+    desired_total = form.cleaned_data["copies"]
+    active_copies = BookCopy.objects.filter(book=book).exclude(status=BookCopy.RETIRED)
+    active_total = active_copies.count()
+    active_loans = Borrowing.objects.filter(book=book, status=Borrowing.BORROWED)
+    borrowed_total = active_loans.count()
+    loan_copy_rows = list(active_loans.values_list("book_copy_id", "copy_id"))
+    loan_copy_pks = [row[0] for row in loan_copy_rows if row[0]]
+    loan_copy_codes = [row[1] for row in loan_copy_rows if row[1]]
+    available_copies = active_copies.filter(status=BookCopy.AVAILABLE).exclude(pk__in=loan_copy_pks).exclude(copy_id__in=loan_copy_codes)
+    ready_total = BookReservation.objects.filter(book=book, status=BookReservation.READY).count()
+    if desired_total < borrowed_total + ready_total:
+        return JsonResponse({"error": "Copies in use or held for pickup prevent reducing the physical stock to that number."}, status=409)
+    retire_count = max(0, active_total - desired_total)
+    retire_candidates = list(available_copies.order_by("-created_at")[:max(0, available_copies.count() - ready_total)])
+    if len(retire_candidates) < retire_count:
+        return JsonResponse({"error": "Only copies that are available and not held can be removed from active stock."}, status=409)
+
+    values = form.save(commit=False)
+    values.copies = 0
+    values.total_copies = active_total
+    values.available = False
+    values.save()
+    BookCopy.objects.filter(book=book).exclude(status=BookCopy.RETIRED).update(
+        shelf=values.shelf,
+        book_title=values.title,
+    )
+
+    if desired_total < active_total:
+        for copy in retire_candidates[:retire_count]:
+            BookCopy.objects.filter(pk=copy.pk, status=BookCopy.AVAILABLE).update(status=BookCopy.RETIRED)
+    elif desired_total > active_total:
+        for _ in range(desired_total - active_total):
+            copy_id = ObjectId()
+            BookCopy.objects.create(
+                id=copy_id,
+                book=book,
+                copy_id=copy_code_for(copy_id),
+                book_title=values.title,
+                shelf=values.shelf,
+            )
+    update_book_stock(book)
+    promote_available_reservations(book)
+    return JsonResponse({"book": book_data(book)})
+
+
+@librarian_api
 @require_GET
 def copies_list(request, book_id):
     object_id = to_object_id(book_id)
     book = get_object_or_404(Book, pk=object_id) if object_id else None
-    copies = BookCopy.objects.filter(book=book).order_by("copy_id")
+    copies = BookCopy.objects.filter(book=book).exclude(status=BookCopy.RETIRED).order_by("copy_id")
     active_loans = {}
     for loan in Borrowing.objects.filter(book=book, status=Borrowing.BORROWED).select_related("book_copy"):
         active_copy_id = loan.copy_id or (loan.book_copy.copy_id if loan.book_copy_id else "")
@@ -484,7 +630,7 @@ def copies_list(request, book_id):
 @librarian_api
 @require_GET
 def all_copies_list(request):
-    copies = BookCopy.objects.select_related("book").order_by("book__title", "copy_id")
+    copies = BookCopy.objects.select_related("book").exclude(status=BookCopy.RETIRED).order_by("book__title", "copy_id")
     active_copy_ids = set()
     for loan in Borrowing.objects.filter(status=Borrowing.BORROWED).select_related("book_copy"):
         active_copy_id = loan.copy_id or (loan.book_copy.copy_id if loan.book_copy_id else "")
@@ -558,6 +704,9 @@ def loans_api(request):
     active_count = Borrowing.objects.filter(member=member, status=Borrowing.BORROWED).count()
     if active_count >= 5:
         return JsonResponse({"error": "This student has reached the five active book limit."}, status=409)
+    hold_error = checkout_hold_error(member, copy)
+    if hold_error:
+        return JsonResponse({"error": hold_error}, status=409)
     record = create_borrowing(member, copy)
     if not record:
         return JsonResponse({"error": "That copy is already on loan. Scan another copy."}, status=409)
@@ -580,6 +729,9 @@ def student_issue(request):
     ).first()
     if not copy:
         return JsonResponse({"error": "This copy is not available. Please choose another."}, status=409)
+    hold_error = checkout_hold_error(member, copy)
+    if hold_error:
+        return JsonResponse({"error": hold_error}, status=409)
     record = create_borrowing(member, copy)
     if not record:
         return JsonResponse({"error": "This copy was just checked out. Please try another."}, status=409)
@@ -594,6 +746,127 @@ def student_issue(request):
 def student_loans(request):
     loans = Borrowing.objects.filter(member=request.student_member)
     return JsonResponse({"results": [borrowing_data(record) for record in loans]})
+
+
+@student_api
+def student_reservations(request):
+    if request.method == "GET":
+        reservations = BookReservation.objects.filter(member=request.student_member)
+        return JsonResponse({"results": [reservation_data(item) for item in reservations]})
+    if request.method != "POST":
+        return JsonResponse({"error": "Use GET or POST."}, status=405)
+    form = BookReservationForm(request.POST)
+    if not form.is_valid():
+        return JsonResponse({"errors": form_errors(form)}, status=400)
+    book_id = to_object_id(form.cleaned_data["book_id"])
+    book = Book.objects.filter(pk=book_id).first() if book_id else None
+    if not book:
+        return JsonResponse({"error": "Book not found."}, status=404)
+    existing = BookReservation.objects.filter(
+        book=book,
+        member=request.student_member,
+        status__in=[BookReservation.WAITING, BookReservation.READY],
+    ).first()
+    if existing:
+        return JsonResponse({"reservation": reservation_data(existing)})
+    promote_available_reservations(book)
+    available = BookCopy.objects.filter(book=book, status=BookCopy.AVAILABLE).count()
+    ready = BookReservation.objects.filter(book=book, status=BookReservation.READY).count()
+    if available > ready:
+        return JsonResponse({"error": "This title has copies available to borrow now."}, status=409)
+    item = BookReservation.objects.create(
+        book=book,
+        member=request.student_member,
+        book_title=book.title,
+    )
+    promote_available_reservations(book)
+    item.refresh_from_db()
+    return JsonResponse({"reservation": reservation_data(item)}, status=201)
+
+
+@student_api
+@require_POST
+def cancel_reservation(request, reservation_id):
+    object_id = to_object_id(reservation_id)
+    item = BookReservation.objects.filter(pk=object_id, member=request.student_member).first() if object_id else None
+    if not item or item.status not in (BookReservation.WAITING, BookReservation.READY):
+        return JsonResponse({"error": "That reservation is no longer active."}, status=404)
+    item.status = BookReservation.CANCELLED
+    item.updated_at = timezone.now()
+    item.save(update_fields=["status", "updated_at"])
+    promote_available_reservations(item.book)
+    return JsonResponse({"reservation": reservation_data(item)})
+
+
+@librarian_api
+@require_GET
+def reservations_list(request):
+    reservations = BookReservation.objects.select_related("book", "member")
+    return JsonResponse({"results": [reservation_data(item) for item in reservations]})
+
+
+@student_api
+@require_POST
+def request_loan_renewal(request):
+    form = LoanRenewalRequestForm(request.POST)
+    if not form.is_valid():
+        return JsonResponse({"errors": form_errors(form)}, status=400)
+    loan_id = to_object_id(form.cleaned_data["loan_id"])
+    loan = Borrowing.objects.filter(pk=loan_id, member=request.student_member).first() if loan_id else None
+    if not loan or loan.status != Borrowing.BORROWED:
+        return JsonResponse({"error": "Only an active loan can be renewed."}, status=404)
+    if overdue_fine(loan)[0] > 0:
+        return JsonResponse({"error": "Renewals must be requested before the due date."}, status=409)
+    if LoanRenewalRequest.objects.filter(borrowing=loan, status=LoanRenewalRequest.APPROVED).exists():
+        return JsonResponse({"error": "This loan has already used its renewal."}, status=409)
+    if LoanRenewalRequest.objects.filter(borrowing=loan, status=LoanRenewalRequest.PENDING).exists():
+        return JsonResponse({"error": "A renewal request is already waiting for review."}, status=409)
+    if loan.book_id and BookReservation.objects.filter(
+        book_id=loan.book_id,
+        status__in=[BookReservation.WAITING, BookReservation.READY],
+    ).exclude(member=request.student_member).exists():
+        return JsonResponse({"error": "Another student is waiting for this title, so this loan cannot be renewed."}, status=409)
+    item = LoanRenewalRequest.objects.create(borrowing=loan, member=request.student_member)
+    return JsonResponse({"renewal": renewal_data(item)}, status=201)
+
+
+@librarian_api
+@require_GET
+def renewal_requests_list(request):
+    items = LoanRenewalRequest.objects.select_related("borrowing", "member")
+    return JsonResponse({"results": [renewal_data(item) for item in items]})
+
+
+@librarian_api
+@require_POST
+def review_renewal(request, renewal_id, action):
+    object_id = to_object_id(renewal_id)
+    item = LoanRenewalRequest.objects.filter(pk=object_id).select_related("borrowing", "member").first() if object_id else None
+    if not item or item.status != LoanRenewalRequest.PENDING:
+        return JsonResponse({"error": "That renewal request is missing or already reviewed."}, status=404)
+    if action not in ("approve", "reject"):
+        return JsonResponse({"error": "Choose approve or reject."}, status=400)
+    now = timezone.now()
+    if action == "approve":
+        loan = item.borrowing
+        if loan.status != Borrowing.BORROWED or overdue_fine(loan)[0] > 0:
+            return JsonResponse({"error": "This loan is returned or overdue and cannot be renewed."}, status=409)
+        if LoanRenewalRequest.objects.filter(borrowing=loan, status=LoanRenewalRequest.APPROVED).exclude(pk=item.pk).exists():
+            return JsonResponse({"error": "This loan has already used its renewal."}, status=409)
+        if loan.book_id and BookReservation.objects.filter(
+            book_id=loan.book_id,
+            status__in=[BookReservation.WAITING, BookReservation.READY],
+        ).exclude(member=item.member).exists():
+            return JsonResponse({"error": "Another student is waiting for this title."}, status=409)
+        loan.due_at = loan.due_at + timedelta(days=14)
+        loan.save(update_fields=["due_at"])
+        item.status = LoanRenewalRequest.APPROVED
+    else:
+        item.status = LoanRenewalRequest.REJECTED
+    item.reviewed_at = now
+    item.reviewed_by = request.user
+    item.save(update_fields=["status", "reviewed_at", "reviewed_by"])
+    return JsonResponse({"renewal": renewal_data(item)})
 
 
 @librarian_api
@@ -709,6 +982,54 @@ def dashboard_data(request):
         "overdue_loans": overdue,
         "pending_requests": StudentSignupRequest.objects.filter(status=StudentSignupRequest.PENDING).count(),
         "unpaid_fines": FineEntry.objects.filter(status=FineEntry.UNPAID).count(),
+    })
+
+
+@librarian_api
+@require_GET
+def reports_data(request):
+    now = timezone.localtime()
+    month_index = now.year * 12 + now.month - 1
+    month_keys = []
+    for offset in reversed(range(6)):
+        year, month_zero = divmod(month_index - offset, 12)
+        month = month_zero + 1
+        month_keys.append((f"{year:04d}-{month:02d}", year, month))
+    start_year, start_month_zero = divmod(month_index - 5, 12)
+    start = datetime(start_year, start_month_zero + 1, 1, tzinfo=timezone.get_current_timezone())
+    records = list(Borrowing.objects.all())
+    popular_counts = Counter(record.book_title for record in records if record.book_title)
+    issue_counts = defaultdict(int)
+    return_counts = defaultdict(int)
+    for record in records:
+        if record.borrowed_at and record.borrowed_at >= start:
+            issue_counts[timezone.localtime(record.borrowed_at).strftime("%Y-%m")] += 1
+        if record.returned_at and record.returned_at >= start:
+            return_counts[timezone.localtime(record.returned_at).strftime("%Y-%m")] += 1
+    circulation = [{
+        "month": key,
+        "label": datetime(year, month, 1).strftime("%b %Y"),
+        "issues": issue_counts[key],
+        "returns": return_counts[key],
+    } for key, year, month in month_keys]
+    recent = Borrowing.objects.all()[:12]
+    return JsonResponse({
+        "popular_books": [{"title": title, "borrowings": count} for title, count in popular_counts.most_common(10)],
+        "circulation": circulation,
+        "recent_transactions": [{
+            "issue_code": item.issue_code,
+            "book_title": item.book_title,
+            "student_name": item.member_name,
+            "student_id": item.member_student_id,
+            "status": item.status,
+            "borrowed_at": item.borrowed_at.isoformat(),
+            "due_at": item.due_at.isoformat(),
+        } for item in recent],
+        "totals": {
+            "borrowings": len(records),
+            "active": sum(item.status == Borrowing.BORROWED for item in records),
+            "returned": sum(item.status == Borrowing.RETURNED for item in records),
+        },
     })
 
 

@@ -94,9 +94,11 @@ class StudentSignupRequest(models.Model):
 class BookCopy(models.Model):
     AVAILABLE = "available"
     BORROWED = "borrowed"
+    RETIRED = "retired"
     STATUS_CHOICES = [
         (AVAILABLE, "Available"),
         (BORROWED, "Borrowed"),
+        (RETIRED, "Retired"),
     ]
 
     book = models.ForeignKey(Book, on_delete=models.PROTECT, related_name="physical_copies")
@@ -174,6 +176,64 @@ class Borrowing(models.Model):
 
     def __str__(self):
         return self.issue_code
+
+
+class BookReservation(models.Model):
+    WAITING = "waiting"
+    READY = "ready"
+    FULFILLED = "fulfilled"
+    CANCELLED = "cancelled"
+    STATUS_CHOICES = [
+        (WAITING, "Waiting"),
+        (READY, "Ready for pickup"),
+        (FULFILLED, "Fulfilled"),
+        (CANCELLED, "Cancelled"),
+    ]
+
+    book = models.ForeignKey(Book, on_delete=models.PROTECT, related_name="reservations")
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="reservations")
+    book_title = models.CharField(max_length=120)
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default=WAITING)
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = "book_reservations"
+        ordering = ["created_at"]
+
+    def __str__(self):
+        return f"{self.member} · {self.book_title} · {self.status}"
+
+
+class LoanRenewalRequest(models.Model):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    STATUS_CHOICES = [
+        (PENDING, "Pending"),
+        (APPROVED, "Approved"),
+        (REJECTED, "Rejected"),
+    ]
+
+    borrowing = models.ForeignKey(Borrowing, on_delete=models.CASCADE, related_name="renewal_requests")
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="renewal_requests")
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default=PENDING)
+    created_at = models.DateTimeField(default=timezone.now)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="reviewed_loan_renewals",
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        db_table = "loan_renewal_requests"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.borrowing.issue_code} · {self.status}"
 
 
 class FineEntry(models.Model):

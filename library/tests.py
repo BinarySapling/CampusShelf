@@ -5,7 +5,7 @@ from django.contrib.auth.models import Group
 from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
-from .models import Book, BookCopy, Borrowing, FineEntry, Member, Review, StudentSignupRequest
+from .models import Book, BookCopy, BookReservation, Borrowing, FineEntry, LoanRenewalRequest, Member, Review, StudentSignupRequest
 from .views import copy_code_for, mark_overdue, overdue_fine
 
 
@@ -292,6 +292,26 @@ class CampusShelfFeatureApiTests(TestCase):
             book_title=self.book.title,
             shelf=self.book.shelf,
         )
+
+    def make_student(self, suffix):
+        student_group, _ = Group.objects.get_or_create(name="Students")
+        user = User.objects.create_user(
+            username=f"STU-FEATURE-{suffix}",
+            password="StudentPass123!",
+            email=f"feature-{suffix.lower()}@campus.edu",
+        )
+        user.groups.add(student_group)
+        member = Member.objects.create(
+            user=user,
+            student_id=user.username,
+            name=f"Feature Reader {suffix}",
+            email=user.email,
+            course="CSE",
+            year=2,
+        )
+        client = Client()
+        client.force_login(user)
+        return member, client
 
     def test_student_signup_waits_for_approval_then_creates_portal_account(self):
         response = self.client.post("/api/signup/", {
@@ -773,4 +793,128 @@ class CampusShelfFeatureApiTests(TestCase):
 
         allowed = csrf_client.post("/api/signup/", values, HTTP_X_CSRFTOKEN=token)
         self.assertEqual(allowed.status_code, 201)
+
+    def test_catalogue_supports_category_availability_and_page_filters(self):
+        other_book = Book.objects.create(
+            title="Available Fiction",
+            author="B. Reader",
+            category="Fiction",
+            copies=1,
+            total_copies=1,
+            available=True,
+            shelf="F-01",
+        )
+        other_copy = BookCopy.objects.create(
+            book=other_book,
+            copy_id=copy_code_for(other_book.id),
+            book_title=other_book.title,
+            shelf=other_book.shelf,
+        )
+        self.copy.status = BookCopy.BORROWED
+        self.copy.save(update_fields=["status"])
+
+        page = self.client.get("/api/catalogue/?page=1&page_size=1")
+        self.assertEqual(page.status_code, 200)
+        self.assertEqual(page.json()["pagination"], {"page": 1, "page_size": 1, "total": 2, "pages": 2})
+        self.assertEqual(len(page.json()["results"]), 1)
+        self.assertIn("Fiction", page.json()["categories"])
+
+        available = self.client.get("/api/catalogue/?availability=available&category=Fiction")
+        self.assertEqual([row["id"] for row in available.json()["results"]], [str(other_book.id)])
+        unavailable = self.client.get("/api/catalogue/?availability=unavailable")
+        self.assertEqual([row["id"] for row in unavailable.json()["results"]], [str(self.book.id)])
+        self.assertEqual(other_copy.status, BookCopy.AVAILABLE)
+
+    def test_librarian_can_edit_inventory_without_erasing_copy_history(self):
+        values = {
+            "title": "QR Reader Revised",
+            "author": "A. Writer",
+            "category": "Technology",
+            "isbn": "9780000000001",
+            "copies": "2",
+            "shelf": "Q-02",
+            "description": "Updated details",
+        }
+        increased = self.staff_client.post(f"/api/books/{self.book.id}/", values)
+        self.assertEqual(increased.status_code, 200)
+        self.book.refresh_from_db()
+        self.assertEqual(self.book.total_copies, 2)
+        self.assertEqual(self.book.title, "QR Reader Revised")
+        self.assertEqual(BookCopy.objects.filter(book=self.book, shelf="Q-02", status=BookCopy.AVAILABLE).count(), 2)
+
+        values["copies"] = "1"
+        reduced = self.staff_client.post(f"/api/books/{self.book.id}/", values)
+        self.assertEqual(reduced.status_code, 200)
+        self.assertEqual(BookCopy.objects.filter(book=self.book).exclude(status=BookCopy.RETIRED).count(), 1)
+        self.assertEqual(BookCopy.objects.filter(book=self.book, status=BookCopy.RETIRED).count(), 1)
+        self.assertEqual(len(self.staff_client.get(f"/api/books/{self.book.id}/copies/").json()["results"]), 1)
+
+        member, student_client = self.make_student("INVENTORY")
+        active_copy = BookCopy.objects.filter(book=self.book, status=BookCopy.AVAILABLE).first()
+        checkout = student_client.post("/api/student/issue/", {"copy_id": active_copy.copy_id})
+        self.assertEqual(checkout.status_code, 201)
+        values["copies"] = "0"
+        blocked = self.staff_client.post(f"/api/books/{self.book.id}/", values)
+        self.assertEqual(blocked.status_code, 409)
+        self.book.refresh_from_db()
+        self.assertEqual(self.book.total_copies, 1)
+        self.assertTrue(Borrowing.objects.filter(member=member, status=Borrowing.BORROWED).exists())
+
+    def test_reservation_queue_promotes_on_return_and_fulfills_on_checkout(self):
+        first_member, first_client = self.make_student("FIRST")
+        next_member, next_client = self.make_student("NEXT")
+        checkout = first_client.post("/api/student/issue/", {"copy_id": self.copy.copy_id})
+        self.assertEqual(checkout.status_code, 201)
+
+        reserved = next_client.post("/api/student/reservations/", {"book_id": str(self.book.id)})
+        self.assertEqual(reserved.status_code, 201)
+        self.assertEqual(reserved.json()["reservation"]["status"], BookReservation.WAITING)
+        self.assertEqual(self.staff_client.get("/api/reservations/").json()["results"][0]["student_id"], next_member.student_id)
+
+        returned = self.staff_client.post("/api/returns/copy/", {"copy_id": self.copy.copy_id})
+        self.assertEqual(returned.status_code, 200)
+        reservation = BookReservation.objects.get(member=next_member, book=self.book)
+        self.assertEqual(reservation.status, BookReservation.READY)
+        queue_block = first_client.post("/api/student/issue/", {"copy_id": self.copy.copy_id})
+        self.assertEqual(queue_block.status_code, 409)
+
+        pickup = next_client.post("/api/student/issue/", {"copy_id": self.copy.copy_id})
+        self.assertEqual(pickup.status_code, 201)
+        reservation.refresh_from_db()
+        self.assertEqual(reservation.status, BookReservation.FULFILLED)
+        self.assertEqual(Borrowing.objects.filter(status=Borrowing.BORROWED, copy_id=self.copy.copy_id).count(), 1)
+
+    def test_renewals_need_librarian_decision_and_reports_include_transactions(self):
+        member, student_client = self.make_student("RENEW")
+        first_checkout = student_client.post("/api/student/issue/", {"copy_id": self.copy.copy_id})
+        self.assertEqual(first_checkout.status_code, 201)
+        loan = Borrowing.objects.get(member=member, status=Borrowing.BORROWED)
+        original_due = loan.due_at
+        requested = student_client.post("/api/student/renewals/", {"loan_id": str(loan.id)})
+        self.assertEqual(requested.status_code, 201)
+        self.assertEqual(self.staff_client.get("/api/renewals/").json()["results"][0]["status"], LoanRenewalRequest.PENDING)
+
+        approved = self.staff_client.post(f"/api/renewals/{requested.json()['renewal']['id']}/approve/")
+        self.assertEqual(approved.status_code, 200)
+        loan.refresh_from_db()
+        self.assertEqual(loan.due_at, original_due + timedelta(days=14))
+        renewal_again = student_client.post("/api/student/renewals/", {"loan_id": str(loan.id)})
+        self.assertEqual(renewal_again.status_code, 409)
+
+        second_book = Book.objects.create(title="Another title", author="C. Writer", category="Fiction", copies=1, total_copies=1, shelf="F-02")
+        second_copy = BookCopy.objects.create(book=second_book, copy_id=copy_code_for(second_book.id), book_title=second_book.title, shelf=second_book.shelf)
+        second_checkout = student_client.post("/api/student/issue/", {"copy_id": second_copy.copy_id})
+        self.assertEqual(second_checkout.status_code, 201)
+        second_loan = Borrowing.objects.get(copy_id=second_copy.copy_id, status=Borrowing.BORROWED)
+        second_request = student_client.post("/api/student/renewals/", {"loan_id": str(second_loan.id)})
+        self.assertEqual(second_request.status_code, 201)
+        rejected = self.staff_client.post(f"/api/renewals/{second_request.json()['renewal']['id']}/reject/")
+        self.assertEqual(rejected.status_code, 200)
+        self.assertEqual(LoanRenewalRequest.objects.get(pk=second_request.json()["renewal"]["id"]).status, LoanRenewalRequest.REJECTED)
+
+        report = self.staff_client.get("/api/reports/")
+        self.assertEqual(report.status_code, 200)
+        self.assertEqual(report.json()["totals"]["borrowings"], 2)
+        self.assertIn("QR Reader", [item["title"] for item in report.json()["popular_books"]])
+        self.assertEqual(len(report.json()["circulation"]), 6)
 
