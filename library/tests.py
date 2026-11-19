@@ -923,6 +923,175 @@ class CampusShelfFeatureApiTests(TestCase):
         self.assertIn("QR Reader", [item["title"] for item in report.json()["popular_books"]])
         self.assertEqual(len(report.json()["circulation"]), 6)
 
+    def test_checkout_policy_blocks_overdue_loans_and_exposes_due_soon_alerts(self):
+        member, student_client = self.make_student("POLICY")
+        now = timezone.now()
+        yesterday = timezone.localdate() - timedelta(days=1)
+        overdue_loan = Borrowing.objects.create(
+            book=self.book,
+            issue_code="CS-POLICY-OVERDUE",
+            copy_id="CSB-LEGACY-OVERDUE",
+            book_title="Late library book",
+            member_name=member.name,
+            member_student_id=member.student_id,
+            status=Borrowing.BORROWED,
+            borrowed_at=now - timedelta(days=20),
+            due_at=timezone.make_aware(datetime.combine(yesterday, time(12))),
+        )
+
+        loans = student_client.get("/api/student/loans/")
+        self.assertEqual(loans.status_code, 200)
+        overdue_data = next(item for item in loans.json()["results"] if item["id"] == str(overdue_loan.pk))
+        self.assertEqual(overdue_data["due_status"], "overdue")
+        self.assertIn("1 day overdue", overdue_data["due_message"])
+        self.assertEqual(overdue_data["current_fine"], "20")
+
+        student_checkout = student_client.post("/api/student/issue/", {"copy_id": self.copy.copy_id})
+        self.assertEqual(student_checkout.status_code, 409)
+        self.assertIn("Late library book", student_checkout.json()["error"])
+        staff_checkout = self.staff_client.post("/api/loans/", {
+            "member_id": str(member.pk),
+            "copy_id": self.copy.copy_id,
+        })
+        self.assertEqual(staff_checkout.status_code, 409)
+        self.assertIn("overdue", staff_checkout.json()["error"])
+        legacy_staff_checkout = self.staff_client.post("/borrowings/", {
+            "member_id": str(member.pk),
+            "book_id": str(self.book.pk),
+            "copy_id": self.copy.copy_id,
+        })
+        self.assertEqual(legacy_staff_checkout.status_code, 302)
+        legacy_student_checkout = student_client.post("/student/issue/", {
+            "student_id": member.student_id,
+            "email": member.email,
+            "password": "StudentPass123!",
+            "book_id": str(self.book.pk),
+            "copy_id": self.copy.copy_id,
+        })
+        self.assertEqual(legacy_student_checkout.status_code, 302)
+        self.assertEqual(Borrowing.objects.filter(member__isnull=True, member_student_id=member.student_id, status=Borrowing.BORROWED).count(), 1)
+
+        due_soon_member, due_soon_client = self.make_student("DUE-SOON")
+        due_soon_day = timezone.localdate() + timedelta(days=3)
+        due_soon_loan = Borrowing.objects.create(
+            book=self.book,
+            member=due_soon_member,
+            issue_code="CS-POLICY-DUE-SOON",
+            copy_id="CSB-DUE-SOON",
+            book_title=self.book.title,
+            member_name=due_soon_member.name,
+            member_student_id=due_soon_member.student_id,
+            status=Borrowing.BORROWED,
+            due_at=timezone.make_aware(datetime.combine(due_soon_day, time(12))),
+        )
+        due_soon_data = due_soon_client.get("/api/student/loans/").json()["results"][0]
+        self.assertEqual(due_soon_data["id"], str(due_soon_loan.pk))
+        self.assertEqual(due_soon_data["due_status"], "due_soon")
+        self.assertEqual(due_soon_data["due_message"], "Due in 3 days")
+        dashboard = self.staff_client.get("/api/dashboard/")
+        self.assertEqual(dashboard.status_code, 200)
+        self.assertEqual(dashboard.json()["overdue_loans"], 1)
+        self.assertEqual(dashboard.json()["due_soon_loans"], 1)
+
+        overdue_loan.status = Borrowing.RETURNED
+        overdue_loan.returned_at = timezone.now()
+        overdue_loan.save(update_fields=["status", "returned_at"])
+        allowed_checkout = student_client.post("/api/student/issue/", {"copy_id": self.copy.copy_id})
+        self.assertEqual(allowed_checkout.status_code, 201)
+
+    def test_transaction_history_is_searchable_scoped_and_includes_fine_payment(self):
+        member, student_client = self.make_student("HISTORY")
+        other_member, _ = self.make_student("OTHER-HISTORY")
+        now = timezone.now()
+        loan = Borrowing.objects.create(
+            book=self.book,
+            member=member,
+            book_copy=self.copy,
+            issue_code="CS-HISTORY-001",
+            copy_id=self.copy.copy_id,
+            book_title=self.book.title,
+            member_name=member.name,
+            member_student_id=member.student_id,
+            status=Borrowing.RETURNED,
+            borrowed_at=now - timedelta(days=5),
+            due_at=now - timedelta(days=3),
+            returned_at=now - timedelta(days=2),
+        )
+        LoanRenewalRequest.objects.create(
+            borrowing=loan,
+            member=member,
+            status=LoanRenewalRequest.APPROVED,
+            created_at=now - timedelta(days=4),
+            reviewed_at=now - timedelta(days=3),
+            reviewed_by=self.staff,
+        )
+        FineEntry.objects.create(
+            member=member,
+            borrowing=loan,
+            member_name=member.name,
+            student_id=member.student_id,
+            amount="40.00",
+            fine_type=FineEntry.CUSTOM,
+            reason="Late return charge",
+            status=FineEntry.PAID,
+            created_at=now - timedelta(days=2),
+            paid_at=now - timedelta(days=1),
+        )
+        Borrowing.objects.create(
+            member=other_member,
+            issue_code="CS-HISTORY-OTHER",
+            copy_id="CSB-OTHER",
+            book_title="Private reader book",
+            member_name=other_member.name,
+            member_student_id=other_member.student_id,
+            status=Borrowing.RETURNED,
+            borrowed_at=now - timedelta(days=4),
+            due_at=now - timedelta(days=2),
+            returned_at=now - timedelta(days=1),
+        )
+
+        history = student_client.get("/api/student/transactions/?q=CS-HISTORY-001")
+        self.assertEqual(history.status_code, 200)
+        events = history.json()["results"]
+        self.assertEqual({item["type"] for item in events}, {"checkout", "return", "renewal", "fine_added", "fine_paid"})
+        self.assertTrue(all(item["student_id"] == member.student_id for item in events))
+        self.assertFalse(any(item["student_id"] == other_member.student_id for item in events))
+        self.assertEqual(next(item for item in events if item["type"] == "fine_paid")["amount"], "40.00")
+
+        filtered = student_client.get("/api/student/transactions/?type=return&page_size=1")
+        self.assertEqual(filtered.status_code, 200)
+        self.assertEqual(len(filtered.json()["results"]), 1)
+        self.assertEqual(filtered.json()["results"][0]["type"], "return")
+        self.assertEqual(student_client.get("/api/transactions/").status_code, 403)
+        self.assertEqual(self.staff_client.get("/api/transactions/?q=CS-HISTORY-001").json()["pagination"]["total"], 5)
+        self.assertEqual(student_client.get("/api/student/transactions/?type=unknown").status_code, 400)
+
+    def test_librarian_admin_can_filter_overdue_and_search_by_copy_or_issue(self):
+        member, _ = self.make_student("ADMIN-FILTER")
+        yesterday = timezone.localdate() - timedelta(days=1)
+        Borrowing.objects.create(
+            book=self.book,
+            member=member,
+            issue_code="CS-ADMIN-FILTER-OVERDUE",
+            copy_id="CSB-ADMIN-FILTER",
+            book_title=self.book.title,
+            member_name=member.name,
+            member_student_id=member.student_id,
+            status=Borrowing.BORROWED,
+            due_at=timezone.make_aware(datetime.combine(yesterday, time(12))),
+        )
+        admin_user = User.objects.create_superuser(
+            username="admin-filter-test",
+            email="admin-filter@campus.edu",
+            password="StrongPass123!",
+        )
+        admin_client = Client()
+        admin_client.force_login(admin_user)
+
+        response = admin_client.get("/admin/library/borrowing/?due_status=overdue&q=CS-ADMIN-FILTER-OVERDUE")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "CS-ADMIN-FILTER-OVERDUE")
+
     def test_qr_return_reconciles_copy_when_loan_snapshot_copy_id_is_stale(self):
         member, _ = self.make_student("STALE-COPY")
         loan = Borrowing.objects.create(

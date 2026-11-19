@@ -1,4 +1,7 @@
+from datetime import datetime, time, timedelta
+
 from django.contrib import admin
+from django.utils import timezone
 
 from .models import Book, BookCopy, BookReservation, Borrowing, FineEntry, LoanRenewalRequest, Member, Review, StudentSignupRequest
 
@@ -31,11 +34,56 @@ class StudentSignupRequestAdmin(admin.ModelAdmin):
     list_filter = ("status", "course", "year")
 
 
+class LoanDueFilter(admin.SimpleListFilter):
+    title = "due status"
+    parameter_name = "due_status"
+
+    def lookups(self, request, model_admin):
+        return (
+            ("overdue", "Overdue"),
+            ("due_soon", "Due within 3 days"),
+            ("on_track", "Due later"),
+            ("returned", "Returned"),
+        )
+
+    def queryset(self, request, queryset):
+        today = timezone.localdate()
+        start_today = timezone.make_aware(datetime.combine(today, time.min))
+        after_due_soon = timezone.make_aware(datetime.combine(today + timedelta(days=4), time.min))
+        if self.value() == "overdue":
+            return queryset.filter(status=Borrowing.BORROWED, due_at__lt=start_today)
+        if self.value() == "due_soon":
+            return queryset.filter(
+                status=Borrowing.BORROWED,
+                due_at__gte=start_today,
+                due_at__lt=after_due_soon,
+            )
+        if self.value() == "on_track":
+            return queryset.filter(status=Borrowing.BORROWED, due_at__gte=after_due_soon)
+        if self.value() == "returned":
+            return queryset.filter(status=Borrowing.RETURNED)
+        return queryset
+
+
 @admin.register(Borrowing)
 class BorrowingAdmin(admin.ModelAdmin):
-    list_display = ("issue_code", "book_title", "member_name", "status", "borrowed_at", "due_at")
-    search_fields = ("issue_code", "book_title", "member_name", "member_student_id")
-    list_filter = ("status",)
+    list_display = ("issue_code", "book_title", "member_name", "copy_id", "status", "borrowed_at", "due_at", "due_state")
+    search_fields = ("issue_code", "book_title", "member_name", "member_student_id", "member_email", "copy_id")
+    list_filter = ("status", "borrowed_at", LoanDueFilter)
+    date_hierarchy = "borrowed_at"
+    ordering = ("-borrowed_at",)
+
+    @admin.display(description="Due state", ordering="due_at")
+    def due_state(self, obj):
+        if obj.status != Borrowing.BORROWED:
+            return "Returned"
+        due_day = timezone.localtime(obj.due_at).date()
+        days = (due_day - timezone.localdate()).days
+        if days < 0:
+            return f"Overdue · {-days}d"
+        if days <= 3:
+            return "Due today" if days == 0 else f"Due in {days}d"
+        return "On time"
 
 
 @admin.register(BookReservation)

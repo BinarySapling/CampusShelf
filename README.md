@@ -12,9 +12,13 @@ CampusShelf is a campus library app. React and Vite provide the browser interfac
 - Unique Copy IDs with printable QR labels for every physical copy, individually or all at once
 - Student signup requests that stay pending until a librarian approves them
 - Student self-checkout by scanning an available copy QR after signing in
+- Five active book limit, with new checkouts blocked while the student has an overdue loan
+- Due-today, due-soon, and overdue alerts in the student loan list and librarian circulation overview
 - Librarian QR returns, with an issue slip and 14-day loan period
 - Automatic overdue fine of ₹20 for each calendar day after the due date
 - Custom student fines with unpaid and paid status
+- Searchable, role-scoped activity history for checkouts, returns, renewals, and fine creation or payment
+- Django Admin circulation filters for status, due state, issue dates, and copy/student/issue search
 - Django session login and CSRF protection for React requests
 - Student and librarian password changes after verifying the current password; librarians can also reset student portal passwords
 

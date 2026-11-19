@@ -35,10 +35,12 @@ from .views import (
     STUDENT_GROUP,
     add_to_group,
     complete_return,
+    checkout_eligibility_error,
     copy_code_for,
     create_borrowing,
     make_staff_id,
     overdue_fine,
+    loan_due_details,
     promote_available_reservations,
     to_object_id,
     update_book_stock,
@@ -159,6 +161,7 @@ def book_data(book, rating_summary=None):
 
 def borrowing_data(record):
     days, amount = overdue_fine(record) if record.status == Borrowing.BORROWED else (0, 0)
+    due_details = loan_due_details(record)
     renewal = LoanRenewalRequest.objects.filter(borrowing=record).order_by("-created_at").first()
     renewed = LoanRenewalRequest.objects.filter(borrowing=record, status=LoanRenewalRequest.APPROVED).exists()
     other_holds = record.book_id and BookReservation.objects.filter(
@@ -182,6 +185,7 @@ def borrowing_data(record):
         "returned_at": record.returned_at.isoformat() if record.returned_at else "",
         "overdue_days": days,
         "current_fine": str(amount),
+        **due_details,
         "renewal_status": renewal.status if renewal else "",
         "renewal_allowed": record.status == Borrowing.BORROWED and not renewed and not days and not other_holds and (not renewal or renewal.status != LoanRenewalRequest.PENDING),
     }
@@ -701,9 +705,9 @@ def loans_api(request):
     copy = BookCopy.objects.filter(copy_id=form.cleaned_data["copy_id"].strip().upper()).first()
     if not member or not copy:
         return JsonResponse({"error": "Choose a student and a valid Copy ID."}, status=404)
-    active_count = Borrowing.objects.filter(member=member, status=Borrowing.BORROWED).count()
-    if active_count >= 5:
-        return JsonResponse({"error": "This student has reached the five active book limit."}, status=409)
+    eligibility_error = checkout_eligibility_error(member)
+    if eligibility_error:
+        return JsonResponse({"error": eligibility_error}, status=409)
     hold_error = checkout_hold_error(member, copy)
     if hold_error:
         return JsonResponse({"error": hold_error}, status=409)
@@ -720,9 +724,9 @@ def student_issue(request):
     if not form.is_valid():
         return JsonResponse({"errors": form_errors(form)}, status=400)
     member = request.student_member
-    active_count = Borrowing.objects.filter(member=member, status=Borrowing.BORROWED).count()
-    if active_count >= 5:
-        return JsonResponse({"error": "You have reached the five active book limit."}, status=409)
+    eligibility_error = checkout_eligibility_error(member)
+    if eligibility_error:
+        return JsonResponse({"error": eligibility_error}, status=409)
     copy = BookCopy.objects.filter(
         copy_id=form.cleaned_data["copy_id"].strip().upper(),
         status=BookCopy.AVAILABLE,
@@ -744,8 +748,166 @@ def student_issue(request):
 @student_api
 @require_GET
 def student_loans(request):
-    loans = Borrowing.objects.filter(member=request.student_member)
+    member = request.student_member
+    loans = Borrowing.objects.filter(status__in=[Borrowing.BORROWED, Borrowing.RETURNED]).filter(
+        Q(member=member) | Q(member__isnull=True, member_student_id=member.student_id)
+    )
     return JsonResponse({"results": [borrowing_data(record) for record in loans]})
+
+
+TRANSACTION_TYPES = {"checkout", "return", "renewal", "fine_added", "fine_paid"}
+
+
+def transaction_history(request, member=None):
+    query = request.GET.get("q", "").strip()[:100]
+    event_type = request.GET.get("type", "").strip()
+    if event_type and event_type not in TRANSACTION_TYPES:
+        return JsonResponse({"error": "Choose a valid transaction type."}, status=400)
+
+    events = []
+    loan_query = Borrowing.objects.all()
+    if member:
+        loan_query = loan_query.filter(
+            Q(member=member) | Q(member__isnull=True, member_student_id=member.student_id)
+        )
+    if query:
+        loan_query = loan_query.filter(
+            Q(issue_code__icontains=query)
+            | Q(copy_id__icontains=query)
+            | Q(book_title__icontains=query)
+            | Q(member_name__icontains=query)
+            | Q(member_student_id__icontains=query)
+        )
+    if not event_type or event_type == "checkout":
+        events.extend({
+            "id": f"checkout-{record.pk}",
+            "type": "checkout",
+            "occurred_at": record.borrowed_at.isoformat(),
+            "title": record.book_title or "Book checkout",
+            "details": f"Copy {record.copy_id} checked out · Issue {record.issue_code}",
+            "student_name": record.member_name,
+            "student_id": record.member_student_id,
+            "copy_id": record.copy_id,
+            "issue_code": record.issue_code,
+            "status": record.status,
+            "amount": "",
+        } for record in loan_query)
+    if not event_type or event_type == "return":
+        events.extend({
+            "id": f"return-{record.pk}",
+            "type": "return",
+            "occurred_at": record.returned_at.isoformat(),
+            "title": record.book_title or "Book return",
+            "details": f"Copy {record.copy_id} returned · Issue {record.issue_code}",
+            "student_name": record.member_name,
+            "student_id": record.member_student_id,
+            "copy_id": record.copy_id,
+            "issue_code": record.issue_code,
+            "status": Borrowing.RETURNED,
+            "amount": "",
+        } for record in loan_query if record.returned_at)
+
+    renewal_query = LoanRenewalRequest.objects.select_related("borrowing", "member")
+    if member:
+        renewal_query = renewal_query.filter(member=member)
+    if query:
+        renewal_query = renewal_query.filter(
+            Q(borrowing__issue_code__icontains=query)
+            | Q(borrowing__copy_id__icontains=query)
+            | Q(borrowing__book_title__icontains=query)
+            | Q(member__name__icontains=query)
+            | Q(member__student_id__icontains=query)
+        )
+    if not event_type or event_type == "renewal":
+        events.extend({
+            "id": f"renewal-{item.pk}",
+            "type": "renewal",
+            "occurred_at": (item.reviewed_at or item.created_at).isoformat(),
+            "title": item.borrowing.book_title or "Loan renewal",
+            "details": f"Renewal request {item.status} · Issue {item.borrowing.issue_code}",
+            "student_name": item.member.name,
+            "student_id": item.member.student_id,
+            "copy_id": item.borrowing.copy_id,
+            "issue_code": item.borrowing.issue_code,
+            "status": item.status,
+            "amount": "",
+        } for item in renewal_query)
+
+    fine_query = FineEntry.objects.all()
+    if member:
+        fine_query = fine_query.filter(
+            Q(member=member) | Q(member__isnull=True, student_id=member.student_id)
+        )
+    if query:
+        fine_query = fine_query.filter(
+            Q(member_name__icontains=query)
+            | Q(student_id__icontains=query)
+            | Q(reason__icontains=query)
+            | Q(borrowing__issue_code__icontains=query)
+            | Q(borrowing__copy_id__icontains=query)
+            | Q(borrowing__book_title__icontains=query)
+        )
+    if not event_type or event_type in {"fine_added", "fine_paid"}:
+        for fine in fine_query:
+            borrowing = Borrowing.objects.filter(pk=fine.borrowing_id).first() if fine.borrowing_id else None
+            if not event_type or event_type == "fine_added":
+                events.append({
+                    "id": f"fine-added-{fine.pk}",
+                    "type": "fine_added",
+                    "occurred_at": fine.created_at.isoformat(),
+                    "title": fine.reason or "Fine added",
+                    "details": f"{fine.fine_type.title()} fine recorded",
+                    "student_name": fine.member_name,
+                    "student_id": fine.student_id,
+                    "copy_id": borrowing.copy_id if borrowing else "",
+                    "issue_code": borrowing.issue_code if borrowing else "",
+                    "status": fine.status,
+                    "amount": str(fine.amount),
+                })
+            if fine.paid_at and (not event_type or event_type == "fine_paid"):
+                events.append({
+                    "id": f"fine-paid-{fine.pk}",
+                    "type": "fine_paid",
+                    "occurred_at": fine.paid_at.isoformat(),
+                    "title": fine.reason or "Fine paid",
+                    "details": f"{fine.fine_type.title()} fine paid",
+                    "student_name": fine.member_name,
+                    "student_id": fine.student_id,
+                    "copy_id": borrowing.copy_id if borrowing else "",
+                    "issue_code": borrowing.issue_code if borrowing else "",
+                    "status": FineEntry.PAID,
+                    "amount": str(fine.amount),
+                })
+
+    events.sort(key=lambda item: datetime.fromisoformat(item["occurred_at"]).timestamp(), reverse=True)
+    try:
+        page = max(1, int(request.GET.get("page", "1")))
+    except ValueError:
+        page = 1
+    try:
+        page_size = min(50, max(1, int(request.GET.get("page_size", "20"))))
+    except ValueError:
+        page_size = 20
+    total = len(events)
+    pages = max(1, (total + page_size - 1) // page_size)
+    page = min(page, pages)
+    start = (page - 1) * page_size
+    return JsonResponse({
+        "results": events[start:start + page_size],
+        "pagination": {"page": page, "page_size": page_size, "total": total, "pages": pages},
+    })
+
+
+@librarian_api
+@require_GET
+def transactions_list(request):
+    return transaction_history(request)
+
+
+@student_api
+@require_GET
+def student_transactions_list(request):
+    return transaction_history(request, member=request.student_member)
 
 
 @student_api
@@ -974,12 +1136,14 @@ def dashboard_data(request):
     books = list(Book.objects.all())
     loans = list(Borrowing.objects.filter(status=Borrowing.BORROWED))
     overdue = sum(1 for loan in loans if overdue_fine(loan)[0] > 0)
+    due_soon = sum(1 for loan in loans if loan_due_details(loan)["due_status"] == "due_soon")
     return JsonResponse({
         "books": len(books),
         "copies": sum(book.total_copies for book in books),
         "members": Member.objects.filter(approval_status=Member.APPROVED).count(),
         "active_loans": len(loans),
         "overdue_loans": overdue,
+        "due_soon_loans": due_soon,
         "pending_requests": StudentSignupRequest.objects.filter(status=StudentSignupRequest.PENDING).count(),
         "unpaid_fines": FineEntry.objects.filter(status=FineEntry.UNPAID).count(),
     })

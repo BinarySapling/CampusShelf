@@ -211,6 +211,8 @@ code { padding: 4px 6px; border: 1px solid #e6e8df; border-radius: 5px; backgrou
 .status.approved, .status.available, .status.paid, .status.ready, .status.fulfilled { background: var(--green-soft); color: #3f7453; }
 .status.pending, .status.unpaid, .status.borrowed { background: var(--gold-soft); color: #99723d; }
 .status.waiting { background: var(--gold-soft); color: #99723d; }
+.status.due_soon { background: #fff1d6; color: #8c5c17; }
+.status.overdue { background: #fae5e1; color: #9e3f35; }
 .status.rejected, .status.returned { background: #efefeb; color: #777f77; }
 .request-list, .fine-list, .review-list { display: grid; }
 .request-row, .fine-row { display: flex; align-items: center; gap: 13px; padding: 14px 0; border-top: 1px solid #eeeee8; }
@@ -221,6 +223,29 @@ code { padding: 4px 6px; border: 1px solid #e6e8df; border-radius: 5px; backgrou
 .request-info small, .fine-info small { color: #949b93; font-size: 8px; }
 .row-actions { display: flex; gap: 7px; }
 .fine-amount { display: grid; width: 59px; min-height: 42px; flex: 0 0 auto; place-items: center; border: 1px solid #efdcd2; border-radius: 9px; background: var(--clay-soft); color: var(--clay); font-size: 12px; font-weight: 700; }
+.due-alert-list { display: grid; gap: 8px; margin: 0 0 16px; }
+.due-alert { display: flex; align-items: center; gap: 11px; padding: 12px 14px; border: 1px solid #eadcbf; border-radius: 9px; background: #fff8e9; color: #735526; }
+.due-alert.overdue { border-color: #e9c8c1; background: #fff1ee; color: #8f3b32; }
+.due-alert-icon { display: grid; width: 27px; height: 27px; flex: 0 0 auto; place-items: center; border-radius: 50%; background: #f2e6c9; color: #805e21; font-size: 14px; font-weight: 800; }
+.due-alert.overdue .due-alert-icon { background: #f1d5cf; color: #973f35; }
+.due-alert > div { display: grid; gap: 3px; }
+.due-alert b { font-size: 10px; }
+.due-alert span:last-child { font-size: 9px; }
+.transaction-filters { display: grid; grid-template-columns: minmax(230px, 1fr) minmax(150px, 220px) auto; align-items: end; gap: 10px; margin-bottom: 16px; }
+.transaction-filters label { display: grid; gap: 6px; color: #68756b; font-size: 9px; font-weight: 700; }
+.transaction-filters input, .transaction-filters select { min-height: 38px; padding: 8px 11px; border: 1px solid #dfe3da; border-radius: 8px; background: #fff; color: var(--ink); font-size: 10px; }
+.transaction-list { display: grid; }
+.transaction-row { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 13px 0; border-top: 1px solid #eeeee8; }
+.transaction-icon { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 50%; background: #edf2e9; color: #4c7255; font-size: 14px; font-weight: 800; }
+.transaction-icon.return, .transaction-icon.fine_paid { background: #e6f1e7; color: #3f7453; }
+.transaction-icon.renewal { background: #edf0f6; color: #63718e; }
+.transaction-icon.fine_added { background: #faece8; color: #a14c40; }
+.transaction-copy { display: grid; min-width: 0; gap: 4px; }
+.transaction-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.transaction-heading > b { color: #34453a; font-size: 10px; }
+.transaction-copy p { margin: 0; color: #69766c; font-size: 9px; }
+.transaction-copy small, .transaction-copy time { color: #929b92; font-size: 8px; }
+.transaction-amount { color: var(--red); font-size: 11px; white-space: nowrap; }
 .review-row { padding: 15px 0; border-top: 1px solid #eeeee8; }
 .review-row b { display: block; margin: 5px 0; font-size: 11px; }
 .review-row p { margin: 6px 0; color: #66736a; font: italic 400 17px/1.4 var(--display); }
@@ -354,6 +379,11 @@ code { padding: 4px 6px; border: 1px solid #e6e8df; border-radius: 5px; backgrou
   .top-date { display: none; }
   .portal-chip { padding: 6px 8px; font-size: 8px; }
   .page-title { min-height: 76px; align-items: center; }
+  .transaction-filters { grid-template-columns: 1fr 1fr; }
+  .transaction-search { grid-column: 1 / -1; }
+  .transaction-filters > button { grid-column: 1 / -1; }
+  .transaction-row { grid-template-columns: 30px minmax(0, 1fr) auto; gap: 8px; }
+  .transaction-icon { width: 29px; height: 29px; }
   .page-title h2 { font-size: 31px; }
   .page-title p { font-size: 10px; }
   .page-title > .button { max-width: 135px; padding-inline: 9px; font-size: 9px; }

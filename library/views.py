@@ -42,6 +42,7 @@ LIBRARIAN_GROUP = "Librarians"
 STUDENT_GROUP = "Students"
 PIE_COLORS = ["#7464dd", "#76c6a3", "#efa681", "#7da9df", "#d5b954", "#bd81ad", "#7b8db3", "#54b7b4"]
 CATEGORIES = ["Technology", "Fiction", "Self Growth", "Productivity", "Design", "Science", "Business", "Other"]
+MAX_ACTIVE_LOANS = 5
 
 
 def page(request, template_name, context=None, status=200):
@@ -157,6 +158,52 @@ def overdue_fine(record, today=None):
     return overdue_days, Decimal(overdue_days * 20)
 
 
+def loan_due_details(record, today=None):
+    if record.status != Borrowing.BORROWED:
+        return {"due_status": "returned", "days_until_due": None, "due_message": "Returned"}
+
+    due_day = timezone.localtime(record.due_at).date()
+    days_until_due = (due_day - (today or timezone.localdate())).days
+    if days_until_due < 0:
+        overdue_days = -days_until_due
+        return {
+            "due_status": "overdue",
+            "days_until_due": days_until_due,
+            "due_message": f"{overdue_days} day{'s' if overdue_days != 1 else ''} overdue",
+        }
+    if days_until_due <= 3:
+        if days_until_due == 0:
+            message = "Due today"
+        elif days_until_due == 1:
+            message = "Due tomorrow"
+        else:
+            message = f"Due in {days_until_due} days"
+        return {
+            "due_status": "due_soon",
+            "days_until_due": days_until_due,
+            "due_message": message,
+        }
+    return {"due_status": "on_track", "days_until_due": days_until_due, "due_message": ""}
+
+
+def checkout_eligibility_error(member, today=None):
+    today = today or timezone.localdate()
+    active_loans = list(Borrowing.objects.filter(status=Borrowing.BORROWED).filter(
+        Q(member=member) | Q(member__isnull=True, member_student_id=member.student_id)
+    ).order_by("due_at"))
+    for loan in active_loans:
+        due_day = timezone.localtime(loan.due_at).date()
+        if due_day < today:
+            overdue_days = (today - due_day).days
+            return (
+                f"Return {loan.book_title or 'the overdue book'} before borrowing another book. "
+                f"This loan is {overdue_days} day{'s' if overdue_days != 1 else ''} overdue."
+            )
+    if len(active_loans) >= MAX_ACTIVE_LOANS:
+        return f"The {MAX_ACTIVE_LOANS} active book limit has been reached."
+    return None
+
+
 def create_borrowing(member, copy_record):
     book = copy_record.book
     active_loans = Borrowing.objects.filter(status=Borrowing.BORROWED).filter(
@@ -175,6 +222,9 @@ def create_borrowing(member, copy_record):
             )
         BookCopy.objects.filter(pk=copy_record.pk).update(**update_fields)
         update_book_stock(book)
+        return None
+
+    if checkout_eligibility_error(member):
         return None
 
     promote_available_reservations(book)
@@ -607,6 +657,7 @@ def borrowings(request):
         ).first() if member_id else None
         copy_id = form.cleaned_data.get("copy_id", "").strip().upper() if form.is_valid() else ""
         copy_record = BookCopy.objects.filter(copy_id=copy_id, status=BookCopy.AVAILABLE).first() if copy_id else None
+        eligibility_error = checkout_eligibility_error(member) if member else None
         if not form.is_valid():
             messages.error(request, "Choose a student and enter a valid available Copy ID.")
         elif not member:
@@ -615,8 +666,8 @@ def borrowings(request):
             messages.error(request, "That Copy ID is unavailable or does not match the selected title.")
         elif checkout_hold_error(member, copy_record):
             messages.error(request, "That available copy is reserved for a student in the hold queue.")
-        elif Borrowing.objects.filter(member=member, status=Borrowing.BORROWED).count() >= 5:
-            messages.error(request, "This student has reached the five active book limit.")
+        elif eligibility_error:
+            messages.error(request, eligibility_error)
         else:
             record = create_borrowing(member, copy_record)
             if record:
@@ -737,8 +788,9 @@ def student_issue(request):
     if not book or not copy_record or copy_record.book_id != book.id:
         messages.error(request, "Choose the matching title and enter an available Copy ID printed in that book.")
         return redirect("student_portal")
-    if Borrowing.objects.filter(member=member, status=Borrowing.BORROWED).count() >= 5:
-        messages.error(request, "This student has reached the five active book limit. Please visit the librarian desk.")
+    eligibility_error = checkout_eligibility_error(member)
+    if eligibility_error:
+        messages.error(request, eligibility_error)
         return redirect("student_portal")
     hold_error = checkout_hold_error(member, copy_record)
     if hold_error:

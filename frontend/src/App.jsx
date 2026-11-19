@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { api, formBody } from "./api.js";
 import Scanner from "./Scanner.jsx";
@@ -13,6 +13,7 @@ const librarianTabs = [
   ["requests", "Access requests", "requests"],
   ["students", "Students", "students"],
   ["loans", "Circulation", "loans"],
+  ["transactions", "Activity", "loans"],
   ["fines", "Fines", "fines"],
   ["reviews", "Reader notes", "reviews"],
   ["account", "Account", "account"],
@@ -21,6 +22,7 @@ const librarianTabs = [
 const studentTabs = [
   ["catalogue", "Discover", "books"],
   ["my_loans", "My loans", "loans"],
+  ["my_history", "History", "loans"],
   ["my_holds", "My holds", "requests"],
   ["my_fines", "My fines", "fines"],
   ["account", "Account", "account"],
@@ -157,6 +159,7 @@ function Dashboard({ setNotice, onNavigate }) {
       <StatCard label="Students" value={loading ? "…" : stats?.members} note="Approved portal accounts" />
       <StatCard label="Books on loan" value={loading ? "…" : stats?.active_loans} note="Across all students" />
       <StatCard label="Late returns" value={loading ? "…" : stats?.overdue_loans} note="Fine starts the next day" />
+      <StatCard label="Due soon" value={loading ? "…" : stats?.due_soon_loans} note="Due within three days" />
       <StatCard label="Requests to review" value={loading ? "…" : stats?.pending_requests} note="Approve before portal access" />
     </div>
     <div className="feature-note"><div className="feature-icon">₹</div><div><b>Overdue fines are calculated consistently</b><p>₹20 per calendar day after the due date, with a single charge recorded when a late book is returned.</p></div></div>
@@ -406,7 +409,55 @@ function LoansPage({ setNotice }) {
       {scanInfo && <div className={`scan-result-card ${scanInfo.returned ? "complete" : ""}`} role="status"><span className="scan-result-mark" aria-hidden="true">{scanInfo.returned ? "✓" : "⌗"}</span><div><span className="eyebrow">{scanInfo.returned ? "RETURN RECORDED" : "COPY SCANNED"}</span><b>{scanInfo.book_title || "Physical copy"}</b><small>{scanInfo.copy_id}{scanInfo.member_name ? ` · With ${scanInfo.member_name}` : ""}{scanInfo.issue_code ? ` · ${scanInfo.issue_code}` : ""}</small><p>{scanInfo.returned ? "This copy is available to borrow again." : mode === "return" && scanInfo.active_loan ? "Active loan found. Complete the return to update the copy and its transaction." : scanInfo.status === "available" ? "Available to borrow. Select a student before issuing." : "No active loan was found for this copy. Review its transaction history before changing its status."}</p></div><span className={`status ${scanInfo.returned ? "available" : scanInfo.active_loan ? "borrowed" : scanInfo.status}`}>{scanInfo.returned ? "Available" : scanInfo.active_loan ? "On loan" : scanInfo.status}</span></div>}
     </section>
     <section className="panel"><div className="panel-head"><div><span className="eyebrow">COMPLETE HISTORY</span><h3>Transaction register</h3></div><span className="pill">{loans.length} records</span></div>
-      <div className="table-scroll"><table><thead><tr><th>Issue ID</th><th>Book / copy</th><th>Student</th><th>Due date</th><th>Current fine</th><th>Status</th></tr></thead><tbody>{loans.map((loan) => <tr key={loan.id}><td><code>{loan.issue_code}</code></td><td><b>{loan.book_title}</b><small>{loan.copy_id}</small></td><td>{loan.member_name}<small>{loan.student_id}</small></td><td>{new Date(loan.due_at).toLocaleDateString()}</td><td>{loan.current_fine === "0" ? "—" : `₹${loan.current_fine}`}</td><td><span className={`status ${loan.status}`}>{loan.status}</span></td></tr>)}</tbody></table></div>{loading && <p className="empty">Loading issue records…</p>}{!loading && loans.length === 0 && <p className="empty">No books have been issued yet.</p>}
+      <div className="table-scroll"><table><thead><tr><th>Issue ID</th><th>Book / copy</th><th>Student</th><th>Due date</th><th>Current fine</th><th>Status</th></tr></thead><tbody>{loans.map((loan) => <tr key={loan.id}><td><code>{loan.issue_code}</code></td><td><b>{loan.book_title}</b><small>{loan.copy_id}</small></td><td>{loan.member_name}<small>{loan.student_id}</small></td><td>{new Date(loan.due_at).toLocaleDateString()}{["due_soon", "overdue"].includes(loan.due_status) && <small><span className={`status ${loan.due_status}`}>{loan.due_message}</span></small>}</td><td>{loan.current_fine === "0" ? "—" : `₹${loan.current_fine}`}</td><td><span className={`status ${loan.status}`}>{loan.status}</span></td></tr>)}</tbody></table></div>{loading && <p className="empty">Loading issue records…</p>}{!loading && loans.length === 0 && <p className="empty">No books have been issued yet.</p>}
+    </section>
+  </>;
+}
+
+function TransactionsPage({ setNotice, student = false }) {
+  const [transactions, setTransactions] = useState([]);
+  const [query, setQuery] = useState("");
+  const [type, setType] = useState("");
+  const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 });
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async (searchTerm, selectedType, pageNumber = 1) => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ q: searchTerm, type: selectedType, page: String(pageNumber) });
+      const path = student ? "/student/transactions/" : "/transactions/";
+      const result = await api(`${path}?${params}`);
+      setTransactions(result.results);
+      setPagination(result.pagination);
+    } finally {
+      setLoading(false);
+    }
+  }, [student]);
+
+  useEffect(() => { load("", "", 1).catch((error) => noticeText(setNotice, error.message, "error")); }, [load]);
+
+  function submit(event) {
+    event.preventDefault();
+    load(query, type, 1).catch((error) => noticeText(setNotice, error.message, "error"));
+  }
+
+  const labels = { checkout: "Book issued", return: "Book returned", renewal: "Renewal", fine_added: "Fine added", fine_paid: "Fine paid" };
+  const icons = { checkout: "↗", return: "✓", renewal: "↻", fine_added: "₹", fine_paid: "✓" };
+
+  return <>
+    <PageTitle eyebrow={student ? "STUDENT PORTAL / ACCOUNT HISTORY" : "LIBRARY DESK / AUDIT"} title={student ? "My activity" : "Transaction activity"} note={student ? "A timeline of your checkouts, returns, renewal decisions, and fines." : "Search circulation and account events across the library."} />
+    <section className="panel transaction-panel">
+      <form className="transaction-filters" onSubmit={submit}>
+        <label className="transaction-search">Search<input value={query} disabled={loading} onChange={(event) => setQuery(event.target.value)} placeholder={student ? "Title, issue ID, or fine reason" : "Student, title, Copy ID, or issue ID"} /></label>
+        <label>Activity type<select value={type} disabled={loading} onChange={(event) => { const value = event.target.value; setType(value); load(query, value, 1).catch((error) => noticeText(setNotice, error.message, "error")); }}><option value="">All activity</option><option value="checkout">Book issued</option><option value="return">Book returned</option><option value="renewal">Renewal</option><option value="fine_added">Fine added</option><option value="fine_paid">Fine paid</option></select></label>
+        <button className="button primary" disabled={loading}>{loading ? "Loading…" : "Search history"}</button>
+      </form>
+      <div className="transaction-list">{transactions.map((item) => <article className="transaction-row" key={item.id}>
+        <span className={`transaction-icon ${item.type}`} aria-hidden="true">{icons[item.type]}</span>
+        <div className="transaction-copy"><div className="transaction-heading"><b>{item.title}</b><span className={`status ${item.status}`}>{labels[item.type]}</span></div><p>{item.details}</p>{!student && <small>{item.student_name} · {item.student_id}</small>}<time dateTime={item.occurred_at}>{new Date(item.occurred_at).toLocaleString()}</time></div>
+        {item.amount && <strong className="transaction-amount">₹{Number(item.amount).toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</strong>}
+      </article>)}{loading && <p className="empty">Loading transaction history…</p>}{!loading && transactions.length === 0 && <p className="empty">No activity matches this search.</p>}</div>
+      <div className="pagination-controls"><span>{pagination.total} event{pagination.total === 1 ? "" : "s"} · Page {pagination.page} of {pagination.pages}</span><div><button className="button light small" disabled={loading || pagination.page <= 1} onClick={() => load(query, type, pagination.page - 1).catch((error) => noticeText(setNotice, error.message, "error"))}>← Previous</button><button className="button light small" disabled={loading || pagination.page >= pagination.pages} onClick={() => load(query, type, pagination.page + 1).catch((error) => noticeText(setNotice, error.message, "error"))}>Next →</button></div></div>
     </section>
   </>;
 }
@@ -817,6 +868,8 @@ function StudentPortal({ user, tab, setTab, setNotice, selectedBook, onOpenBook,
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  const dueAlerts = loans.filter((loan) => ["due_soon", "overdue"].includes(loan.due_status));
+
   if (tab === "catalogue") return <>
     <section className="student-welcome"><div><span className="eyebrow">YOUR CAMPUS LIBRARY</span><h2>Hello, {user.name.split(" ")[0]}.</h2><p>Find a title that interests you, then check out the exact copy from its QR label.</p></div><div className="welcome-mark" aria-hidden="true"><span>YOUR NEXT</span><b>read</b><span>STARTS HERE</span></div></section>
     {slip && <IssueSlip loan={slip} onClose={() => setSlip(null)} />}
@@ -838,8 +891,9 @@ function StudentPortal({ user, tab, setTab, setNotice, selectedBook, onOpenBook,
   </>;
 
   if (tab === "my_loans") return <>
-    <PageTitle eyebrow="STUDENT PORTAL / CIRCULATION" title="My loans" note="Your active issues and return dates." />
+    <PageTitle eyebrow="STUDENT PORTAL / CIRCULATION" title="My loans" note="Your active issues, due-date alerts, and return dates." />
     {slip && <IssueSlip loan={slip} onClose={() => setSlip(null)} />}
+    {dueAlerts.length > 0 && <section className="due-alert-list" aria-label="Due date alerts">{dueAlerts.map((loan) => <article className={`due-alert ${loan.due_status}`} key={loan.id}><span className="due-alert-icon" aria-hidden="true">{loan.due_status === "overdue" ? "!" : "◷"}</span><div><b>{loan.book_title}</b><span>{loan.due_message}{loan.due_status === "overdue" && Number(loan.current_fine) > 0 ? ` · Current fine ₹${loan.current_fine}` : ""}</span></div></article>)}</section>}
     <section className="panel"><div className="table-scroll"><table><thead><tr><th>Book</th><th>Copy ID</th><th>Issue ID</th><th>Due date</th><th>Fine today</th><th>Status</th><th>Renewal</th><th>Slip / return QR</th></tr></thead><tbody>{loans.map((loan) => <tr key={loan.id}><td><b>{loan.book_title}</b><small>{loan.book_author}</small></td><td><code>{loan.copy_id}</code></td><td><code>{loan.issue_code}</code></td><td>{new Date(loan.due_at).toLocaleDateString()}</td><td>{loan.current_fine === "0" ? "—" : `₹${loan.current_fine}`}</td><td><span className={`status ${loan.status}`}>{loan.status}</span></td><td>{loan.renewal_status === "pending" ? <span className="status pending">In review</span> : loan.renewal_status === "approved" ? <span className="status approved">Renewed</span> : loan.renewal_status === "rejected" ? <span className="renewal-rejected"><span className="status rejected">Declined</span>{loan.renewal_allowed && <button className="button light small" disabled={renewingLoanId === loan.id} onClick={() => requestRenewal(loan)}>{renewingLoanId === loan.id ? "Sending…" : "Request again"}</button>}</span> : loan.renewal_allowed ? <button className="button light small" disabled={renewingLoanId === loan.id} onClick={() => requestRenewal(loan)}>{renewingLoanId === loan.id ? "Sending…" : "Request renewal"}</button> : "—"}</td><td><button className="button light small" onClick={() => openIssueSlip(loan)}>{loan.status === "borrowed" ? "Open return QR & slip" : "Open issue slip"}</button></td></tr>)}</tbody></table></div>{loading && <p className="empty">Loading your loans…</p>}{!loading && loans.length === 0 && <p className="empty">You do not have any loans yet.</p>}</section>
   </>;
 
@@ -918,6 +972,7 @@ export default function App() {
   const active = tabs.find((item) => item[0] === activeTab) || tabs[0];
   let content;
   if (tab === "account") content = <AccountPage user={user} setNotice={setNotice} />;
+  else if (isStudent && tab === "my_history") content = <TransactionsPage setNotice={setNotice} student />;
   else if (isStudent) content = <StudentPortal key={tab} user={user} tab={tab} setTab={setTab} setNotice={setNotice} selectedBook={selectedBook} onOpenBook={(book) => { setSelectedBook(book); setTab("student_book"); }} onBackToBooks={() => setTab("catalogue")} onBookRatingChange={(ratings) => setSelectedBook((book) => book ? { ...book, ...ratings } : book)} />;
   else if (tab === "overview") content = <Dashboard setNotice={setNotice} onNavigate={setTab} />;
   else if (tab === "books") content = <BooksPage setNotice={setNotice} onAddBook={() => setTab("add_book")} onOpenBook={(book) => { setSelectedBook(book); setTab("book_detail"); }} />;
@@ -928,6 +983,7 @@ export default function App() {
   else if (tab === "requests") content = <RequestsPage setNotice={setNotice} />;
   else if (tab === "reservations") content = <ReservationsPage setNotice={setNotice} />;
   else if (tab === "renewals") content = <RenewalsPage setNotice={setNotice} />;
+  else if (tab === "transactions") content = <TransactionsPage setNotice={setNotice} />;
   else if (tab === "reports") content = <ReportsPage setNotice={setNotice} />;
   else if (tab === "students") content = <StudentsPage setNotice={setNotice} />;
   else if (tab === "loans") content = <LoansPage setNotice={setNotice} />;
