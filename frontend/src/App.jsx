@@ -940,9 +940,9 @@ export default function App() {
       <div className="sidebar-label">{isStudent ? "YOUR LIBRARY" : "WORKSPACE"}</div>
       <nav aria-label={isStudent ? "Student portal" : "Librarian workspace"}>{tabs.map(([key, label, icon]) => <button className={activeTab === key ? "active" : ""} key={key} onClick={() => setTab(key)}><NavIcon name={icon} />{label}</button>)}</nav>
       {!isStudent && <div className="sidebar-help"><span className="eyebrow">QUICK NOTE</span><p>Scan the label on the physical copy, not the book cover.</p><a href="/admin/">Open Django Admin ↗</a></div>}
-      <div className="sidebar-user"><div className="avatar">{user.name.slice(0, 1).toUpperCase()}</div><div><b>{user.name}</b><small>{isStudent ? user.student_id : user.login_id}</small></div><button className="signout-button" title="Sign out" onClick={signOut}>Sign out</button></div>
+      <div className="sidebar-user"><div className="avatar">{user.name.slice(0, 1).toUpperCase()}</div><div><b>{user.name}</b><small>{isStudent ? user.student_id : user.login_id}</small></div></div>
     </aside>
-    <main className="main-area"><header className="topbar"><div><span className="eyebrow">{isStudent ? "STUDENT PORTAL" : "LIBRARIAN WORKSPACE"}</span><h1>{active[1]}</h1></div><div className="topbar-right"><span className="portal-chip">{isStudent ? "Reader account" : "Library staff"}</span><span className="top-date">CampusShelf</span></div></header>
+    <main className="main-area"><header className="topbar"><div><span className="eyebrow">{isStudent ? "STUDENT PORTAL" : "LIBRARIAN WORKSPACE"}</span><h1>{active[1]}</h1></div><div className="topbar-right"><span className="portal-chip">{isStudent ? "Reader account" : "Library staff"}</span><span className="top-date">CampusShelf</span><button className="signout-button" type="button" onClick={signOut}>Sign out</button></div></header>
       {notice && <div className={`notice ${notice.kind}`} role="status">{notice.text}<button onClick={() => setNotice(null)}>×</button></div>}
       <div className="page-content">{content}</div>
     </main>
