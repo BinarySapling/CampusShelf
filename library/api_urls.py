@@ -44,6 +44,13 @@ urlpatterns = [
     path("fines/<str:fine_id>/paid/", api.mark_fine_paid, name="api_mark_fine_paid"),
     path("reviews/", api.reviews_list, name="api_reviews"),
     path("reviews/add/", api.add_review, name="api_add_review"),
+    path("spaces/", api.spaces_list, name="api_spaces_list"),
+    path("spaces/book/", api.create_space_booking, name="api_create_space_booking"),
+    path("student/space-bookings/", api.student_space_bookings, name="api_student_space_bookings"),
+    path("student/space-bookings/<str:booking_id>/cancel/", api.cancel_space_booking, name="api_cancel_space_booking"),
+    path("librarian/space-bookings/", api.librarian_space_bookings, name="api_librarian_space_bookings"),
+    path("librarian/space-bookings/<str:booking_id>/<str:action>/", api.review_space_booking, name="api_review_space_booking"),
+    path("chat/", api.chat_assistant, name="api_chat_assistant"),
     path("health/", views.health, name="api_health"),
 ]
 

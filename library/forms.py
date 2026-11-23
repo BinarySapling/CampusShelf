@@ -87,6 +87,7 @@ class PortalPasswordForm(forms.Form):
 
 class LibrarianForm(forms.Form):
     name = forms.CharField(max_length=80)
+    email = forms.EmailField(max_length=160, required=False)
     password = forms.CharField(min_length=10, max_length=256, widget=forms.PasswordInput)
 
 
@@ -158,3 +159,13 @@ class CustomFineForm(forms.Form):
     member_id = forms.CharField(max_length=32)
     amount = forms.DecimalField(min_value=0.01, max_digits=8, decimal_places=2)
     reason = forms.CharField(max_length=200)
+
+
+class SpaceBookingForm(forms.Form):
+    space_id = forms.CharField(max_length=40)
+    booking_date = forms.CharField(max_length=10)
+    start_time = forms.CharField(max_length=5)
+    end_time = forms.CharField(max_length=5)
+    attendees_count = forms.IntegerField(min_value=1, max_value=100)
+    purpose = forms.CharField(max_length=250, required=False)
+

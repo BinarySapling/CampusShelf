@@ -316,3 +316,83 @@ class Review(models.Model):
     def __str__(self):
         return f"{self.rating}/5 · {self.book_title or self.book}"
 
+
+class LibrarySpace(models.Model):
+    POD = "pod"
+    ROOM = "room"
+    SLOT = "slot"
+    TYPE_CHOICES = [
+        (POD, "Study Pod"),
+        (ROOM, "Conference Room"),
+        (SLOT, "Study Slot"),
+    ]
+
+    name = models.CharField(max_length=100, unique=True)
+    space_type = models.CharField(max_length=20, choices=TYPE_CHOICES)
+    capacity = models.PositiveIntegerField(default=1)
+    location = models.CharField(max_length=100, blank=True)
+    description = models.CharField(max_length=250, blank=True)
+    amenities = models.CharField(max_length=250, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = "library_spaces"
+        ordering = ["space_type", "name"]
+
+    def __str__(self):
+        return f"{self.name} ({self.get_space_type_display()})"
+
+
+class SpaceBooking(models.Model):
+    PENDING = "pending"
+    CONFIRMED = "confirmed"
+    REJECTED = "rejected"
+    CANCELLED = "cancelled"
+    STATUS_CHOICES = [
+        (PENDING, "Pending Approval"),
+        (CONFIRMED, "Confirmed"),
+        (REJECTED, "Rejected"),
+        (CANCELLED, "Cancelled"),
+    ]
+
+    space = models.ForeignKey(
+        LibrarySpace,
+        on_delete=models.CASCADE,
+        related_name="bookings",
+    )
+    space_name = models.CharField(max_length=100, blank=True)
+    space_type = models.CharField(max_length=20, blank=True)
+    member = models.ForeignKey(
+        Member,
+        on_delete=models.CASCADE,
+        related_name="space_bookings",
+    )
+    student_name = models.CharField(max_length=100, blank=True)
+    student_id = models.CharField(max_length=32, blank=True)
+    student_email = models.EmailField(max_length=160, blank=True)
+    booking_date = models.CharField(max_length=10)
+    start_time = models.CharField(max_length=5)
+    end_time = models.CharField(max_length=5)
+    attendees_count = models.PositiveIntegerField(default=1)
+    purpose = models.CharField(max_length=250, blank=True)
+    status = models.CharField(max_length=15, choices=STATUS_CHOICES, default=PENDING)
+    rejection_reason = models.CharField(max_length=250, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="reviewed_space_bookings",
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        db_table = "space_bookings"
+        ordering = ["-booking_date", "-start_time"]
+
+    def __str__(self):
+        return f"{self.space_name} · {self.booking_date} {self.start_time}-{self.end_time} · {self.student_name} ({self.status})"
+
+

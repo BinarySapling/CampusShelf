@@ -25,11 +25,24 @@ from .forms import (
     LoanRenewalRequestForm,
     ManualIssueForm,
     ReviewForm,
+    SpaceBookingForm,
     StudentIssueForm,
     StudentReviewForm,
     StudentSignupForm,
 )
-from .models import Book, BookCopy, BookReservation, Borrowing, FineEntry, LoanRenewalRequest, Member, Review, StudentSignupRequest
+from .models import (
+    Book,
+    BookCopy,
+    BookReservation,
+    Borrowing,
+    FineEntry,
+    LibrarySpace,
+    LoanRenewalRequest,
+    Member,
+    Review,
+    SpaceBooking,
+    StudentSignupRequest,
+)
 from .views import (
     LIBRARIAN_GROUP,
     STUDENT_GROUP,
@@ -94,6 +107,7 @@ def account_data(user):
             "name": user.first_name or user.username,
             "role": "librarian",
             "login_id": user.username,
+            "email": user.email or "",
         }
 
     member = Member.objects.filter(user=user, approval_status=Member.APPROVED).first()
@@ -103,6 +117,7 @@ def account_data(user):
             "name": member.name,
             "role": "student",
             "student_id": member.student_id,
+            "email": member.email,
         }
     return None
 
@@ -311,18 +326,32 @@ def login_user(request):
         return JsonResponse({"errors": form_errors(form)}, status=400)
 
     login_id = form.cleaned_data["login_id"].strip()
-    account_user = User.objects.filter(username__iexact=login_id).first()
+    
+    # 1. Match student Member by student_id or email
+    member = Member.objects.filter(
+        Q(student_id__iexact=login_id) | Q(email__iexact=login_id)
+    ).first()
+
+    if member and member.user:
+        account_user = member.user
+    else:
+        # 2. Match User by username or email (e.g. librarian, admin, or username)
+        account_user = User.objects.filter(
+            Q(username__iexact=login_id) | Q(email__iexact=login_id)
+        ).first()
+
+    username_to_auth = account_user.username if account_user else login_id
     user = authenticate(
         request,
-        username=account_user.username if account_user else login_id,
+        username=username_to_auth,
         password=form.cleaned_data["password"],
     )
     if user is None:
-        return JsonResponse({"error": "The ID and password did not match an active account."}, status=400)
+        return JsonResponse({"error": "The ID or email and password did not match an active account."}, status=400)
 
     account = account_data(user)
     if not account:
-        return JsonResponse({"error": "This account is waiting for librarian approval."}, status=403)
+        return JsonResponse({"error": "This account is inactive or not configured."}, status=403)
     auth_login(request, user)
     return JsonResponse({"user": account})
 
@@ -336,8 +365,10 @@ def setup_librarian(request):
     if not form.is_valid():
         return JsonResponse({"errors": form_errors(form)}, status=400)
 
+    email = form.cleaned_data.get("email", "").strip().lower()
     user = User.objects.create_user(
         username=make_staff_id("LIB"),
+        email=email,
         first_name=form.cleaned_data["name"].strip(),
         password=form.cleaned_data["password"],
     )
@@ -376,9 +407,13 @@ def submit_signup(request):
 
     values = form.cleaned_data
     email = values["email"]
-    if StudentSignupRequest.objects.filter(email__iexact=email, status=StudentSignupRequest.PENDING).exists():
-        return JsonResponse({"error": "A signup request for this email is already waiting for review."}, status=409)
+
+    # Check if active User already exists
     existing_user = User.objects.filter(email__iexact=email).first()
+    if existing_user and existing_user.is_active:
+        return JsonResponse({"error": "An account with this email already exists."}, status=409)
+
+    # Check if User was previously rejected by a librarian
     if existing_user:
         old_request = StudentSignupRequest.objects.filter(user=existing_user).first()
         if old_request and old_request.status == StudentSignupRequest.REJECTED:
@@ -398,29 +433,79 @@ def submit_signup(request):
                 "reviewed_by", "reviewed_at", "submitted_at",
             ])
             return JsonResponse({"message": "Your signup request was sent to a librarian for approval."}, status=201)
-        elif old_request:
-            return JsonResponse({"error": "This email already has an account request."}, status=409)
-        elif existing_user.is_active:
-            return JsonResponse({"error": "An account with this email already exists."}, status=409)
-        else:
-            return JsonResponse({"error": "Please ask a librarian to review your existing account."}, status=409)
 
-    user = User.objects.create_user(
-        username=email,
-        email=email,
-        first_name=values["name"].strip(),
-        password=values["password"],
-        is_active=False,
-    )
-    StudentSignupRequest.objects.create(
-        user=user,
-        name=values["name"].strip(),
-        email=email,
-        registration_number=values["registration_number"].strip(),
-        course=values["course"].strip(),
-        year=values["year"],
-    )
-    return JsonResponse({"message": "Your signup request was sent to a librarian for approval."}, status=201)
+    # Check if Member already exists for this email
+    member = Member.objects.filter(email__iexact=email).first()
+    if member and member.user and member.user.is_active:
+        return JsonResponse({"error": "An account with this email already exists."}, status=409)
+
+    if member:
+        student_id = member.student_id
+        member.name = values["name"].strip()
+        member.course = values["course"].strip()
+        member.year = values["year"]
+        member.approval_status = Member.APPROVED
+    else:
+        student_id = make_staff_id("STU").upper()
+        member = Member.objects.create(
+            student_id=student_id,
+            name=values["name"].strip(),
+            email=email,
+            course=values["course"].strip(),
+            year=values["year"],
+            approval_status=Member.APPROVED,
+        )
+
+    if existing_user:
+        user = existing_user
+        user.username = student_id
+        user.first_name = values["name"].strip()
+        user.set_password(values["password"])
+        user.is_active = True
+        user.save(update_fields=["username", "first_name", "password", "is_active"])
+    else:
+        user = User.objects.create_user(
+            username=student_id,
+            email=email,
+            first_name=values["name"].strip(),
+            password=values["password"],
+            is_active=True,
+        )
+
+    member.user = user
+    member.save(update_fields=["user", "approval_status", "name", "course", "year"])
+    add_to_group(user, STUDENT_GROUP)
+
+    # Maintain StudentSignupRequest record for history / admin visibility
+    signup_req = StudentSignupRequest.objects.filter(email__iexact=email).first()
+    if not signup_req:
+        StudentSignupRequest.objects.create(
+            user=user,
+            name=member.name,
+            email=email,
+            registration_number=values["registration_number"].strip(),
+            course=member.course,
+            year=member.year,
+            status=StudentSignupRequest.APPROVED,
+            reviewed_at=timezone.now(),
+        )
+    else:
+        signup_req.user = user
+        signup_req.name = member.name
+        signup_req.registration_number = values["registration_number"].strip()
+        signup_req.course = member.course
+        signup_req.year = member.year
+        signup_req.status = StudentSignupRequest.APPROVED
+        signup_req.reviewed_at = timezone.now()
+        signup_req.save()
+
+    auth_login(request, user)
+    return JsonResponse({
+        "message": f"Welcome, {member.name}! Your student account is active. Student ID: {student_id}.",
+        "user": account_data(user),
+        "student_id": student_id,
+    }, status=201)
+
 
 
 @librarian_api
@@ -444,8 +529,8 @@ def requests_list(request):
 def review_signup(request, request_id, action):
     signup_id = to_object_id(request_id)
     signup = StudentSignupRequest.objects.filter(pk=signup_id).first() if signup_id else None
-    if not signup or signup.status != StudentSignupRequest.PENDING:
-        return JsonResponse({"error": "That request is missing or already reviewed."}, status=404)
+    if not signup or signup.status == StudentSignupRequest.REJECTED:
+        return JsonResponse({"error": "That request is missing or already rejected."}, status=404)
     if action not in ("approve", "reject"):
         return JsonResponse({"error": "Choose approve or reject."}, status=400)
 
@@ -456,6 +541,10 @@ def review_signup(request, request_id, action):
         signup.save(update_fields=["status", "reviewed_by", "reviewed_at"])
         signup.user.is_active = False
         signup.user.save(update_fields=["is_active"])
+        member = Member.objects.filter(user=signup.user).first()
+        if member:
+            member.approval_status = Member.PENDING
+            member.save(update_fields=["approval_status"])
         return JsonResponse({"message": "Signup request rejected."})
 
     member = Member.objects.filter(email__iexact=signup.email).first()
@@ -1311,4 +1400,442 @@ def members_catalogue(request):
         "name": member.name,
         "email": member.email,
     } for member in Member.objects.filter(approval_status=Member.APPROVED)[:200]]})
+
+
+DEFAULT_LIBRARY_SPACES = [
+    {
+        "name": "Silent Focus Pod 1",
+        "space_type": LibrarySpace.POD,
+        "capacity": 1,
+        "location": "1st Floor · Silent Bay",
+        "description": "Soundproof acoustic solo pod for deep focus, reading, and exam preparation.",
+        "amenities": "Acoustic insulation, Power socket, USB-C PD, Task lamp, Ergonomic chair",
+    },
+    {
+        "name": "Silent Focus Pod 2",
+        "space_type": LibrarySpace.POD,
+        "capacity": 1,
+        "location": "1st Floor · Silent Bay",
+        "description": "Ergonomic solo pod with standing desk converter for focused study.",
+        "amenities": "Acoustic insulation, Standing desk, Power socket, Task lamp",
+    },
+    {
+        "name": "Collaboration Pod A",
+        "space_type": LibrarySpace.POD,
+        "capacity": 2,
+        "location": "2nd Floor · Innovation Hub",
+        "description": "Duo collaboration pod designed for peer study, research, and pair programming.",
+        "amenities": "Soundproof glass, Dual 27-inch monitors, Whiteboard, USB-C hub",
+    },
+    {
+        "name": "Team Pod B",
+        "space_type": LibrarySpace.POD,
+        "capacity": 4,
+        "location": "2nd Floor · Innovation Hub",
+        "description": "Compact team pod with display screencast for small group project discussions.",
+        "amenities": "Smart TV display, Whiteboard, 4 Power sockets, Round meeting table",
+    },
+    {
+        "name": "Conference Room Alpha",
+        "space_type": LibrarySpace.ROOM,
+        "capacity": 10,
+        "location": "3rd Floor · Seminar Wing",
+        "description": "Mid-sized conference room with video conferencing and projection equipment.",
+        "amenities": "4K Projector & Screen, Conference mic & camera, Glass whiteboard, AC, Wi-Fi 6",
+    },
+    {
+        "name": "Conference Room Beta",
+        "space_type": LibrarySpace.ROOM,
+        "capacity": 16,
+        "location": "3rd Floor · Seminar Wing",
+        "description": "Executive conference hall suited for student society presentations and workshops.",
+        "amenities": "Dual 4K displays, Ceiling array microphone, Surround sound, Whiteboards, Podium",
+    },
+    {
+        "name": "Group Discussion Room",
+        "space_type": LibrarySpace.ROOM,
+        "capacity": 6,
+        "location": "2nd Floor · South Wing",
+        "description": "Acoustically treated discussion room for project teams and club meetings.",
+        "amenities": "Smart board, High-speed LAN, Comfortable conference seating, Whiteboard",
+    },
+    {
+        "name": "Quiet Study Slot S-01",
+        "space_type": LibrarySpace.SLOT,
+        "capacity": 1,
+        "location": "1st Floor · Central Reading Hall",
+        "description": "Dedicated single study carrel with private partitions for minimal distraction.",
+        "amenities": "Partitioned cubicle, Soft LED reading lamp, Dual AC power outlets",
+    },
+    {
+        "name": "Quiet Study Slot S-02",
+        "space_type": LibrarySpace.SLOT,
+        "capacity": 1,
+        "location": "1st Floor · Central Reading Hall",
+        "description": "Dedicated single study carrel near natural window lighting.",
+        "amenities": "Partitioned cubicle, Window view, LED lamp, Power outlets",
+    },
+    {
+        "name": "Research Desk R-01",
+        "space_type": LibrarySpace.SLOT,
+        "capacity": 2,
+        "location": "2nd Floor · Archives & Reference",
+        "description": "Spacious reference research desk equipped for document analysis.",
+        "amenities": "Extended desktop, Dedicated bookshelf, LAN connection, Task lights",
+    },
+]
+
+
+def ensure_default_spaces():
+    if not LibrarySpace.objects.exists():
+        for item in DEFAULT_LIBRARY_SPACES:
+            LibrarySpace.objects.create(**item)
+
+
+STANDARD_HOURLY_SLOTS = [
+    ("08:00", "09:00"),
+    ("09:00", "10:00"),
+    ("10:00", "11:00"),
+    ("11:00", "12:00"),
+    ("12:00", "13:00"),
+    ("13:00", "14:00"),
+    ("14:00", "15:00"),
+    ("15:00", "16:00"),
+    ("16:00", "17:00"),
+    ("17:00", "18:00"),
+    ("18:00", "19:00"),
+    ("19:00", "20:00"),
+]
+
+
+def space_booking_data(booking):
+    return {
+        "id": str(booking.pk),
+        "space_id": str(booking.space_id),
+        "space_name": booking.space_name,
+        "space_type": booking.space_type,
+        "student_name": booking.student_name,
+        "student_id": booking.student_id,
+        "student_email": booking.student_email,
+        "booking_date": booking.booking_date,
+        "start_time": booking.start_time,
+        "end_time": booking.end_time,
+        "attendees_count": booking.attendees_count,
+        "purpose": booking.purpose,
+        "status": booking.status,
+        "rejection_reason": booking.rejection_reason,
+        "created_at": booking.created_at.isoformat(),
+        "reviewed_at": booking.reviewed_at.isoformat() if booking.reviewed_at else None,
+    }
+
+
+def times_overlap(start1, end1, start2, end2):
+    return start1 < end2 and end1 > start2
+
+
+@require_GET
+def spaces_list(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Please sign in first."}, status=401)
+
+    ensure_default_spaces()
+
+    date_str = request.GET.get("date", "").strip()
+    if not date_str:
+        date_str = timezone.localdate().isoformat()
+
+    space_type = request.GET.get("type", "").strip()
+    queryset = LibrarySpace.objects.filter(is_active=True)
+    if space_type and space_type != "all":
+        queryset = queryset.filter(space_type=space_type)
+
+    spaces = list(queryset)
+    space_ids = [space.pk for space in spaces]
+
+    # Active bookings on that date
+    day_bookings = list(
+        SpaceBooking.objects.filter(
+            space_id__in=space_ids,
+            booking_date=date_str,
+            status__in=[SpaceBooking.CONFIRMED, SpaceBooking.PENDING],
+        )
+    )
+
+    bookings_by_space = defaultdict(list)
+    for b in day_bookings:
+        bookings_by_space[b.space_id].append(b)
+
+    results = []
+    for space in spaces:
+        s_bookings = bookings_by_space.get(space.pk, [])
+
+        # Build schedule for standard slots
+        schedule = []
+        occupied_count = 0
+        pending_count = 0
+
+        for slot_start, slot_end in STANDARD_HOURLY_SLOTS:
+            confirmed_match = any(
+                b.status == SpaceBooking.CONFIRMED and times_overlap(slot_start, slot_end, b.start_time, b.end_time)
+                for b in s_bookings
+            )
+            pending_match = any(
+                b.status == SpaceBooking.PENDING and times_overlap(slot_start, slot_end, b.start_time, b.end_time)
+                for b in s_bookings
+            )
+
+            if confirmed_match:
+                slot_status = "occupied"
+                occupied_count += 1
+            elif pending_match:
+                slot_status = "pending"
+                pending_count += 1
+            else:
+                slot_status = "empty"
+
+            schedule.append({
+                "start": slot_start,
+                "end": slot_end,
+                "status": slot_status,
+            })
+
+        empty_count = len(STANDARD_HOURLY_SLOTS) - occupied_count - pending_count
+
+        results.append({
+            "id": str(space.pk),
+            "name": space.name,
+            "space_type": space.space_type,
+            "space_type_display": space.get_space_type_display(),
+            "capacity": space.capacity,
+            "location": space.location,
+            "description": space.description,
+            "amenities": space.amenities,
+            "empty_slots_count": empty_count,
+            "occupied_slots_count": occupied_count,
+            "pending_slots_count": pending_count,
+            "is_fully_booked": empty_count == 0,
+            "schedule": schedule,
+            "bookings": [space_booking_data(b) for b in s_bookings],
+        })
+
+    return JsonResponse({
+        "date": date_str,
+        "results": results,
+    })
+
+
+@student_api
+@require_POST
+def create_space_booking(request):
+    form = SpaceBookingForm(request.POST)
+    if not form.is_valid():
+        return JsonResponse({"errors": form_errors(form)}, status=400)
+
+    data = form.cleaned_data
+    space_id = to_object_id(data["space_id"])
+    space = LibrarySpace.objects.filter(pk=space_id, is_active=True).first() if space_id else None
+    if not space:
+        return JsonResponse({"error": "Selected study space or pod was not found."}, status=404)
+
+    booking_date = data["booking_date"].strip()
+    try:
+        parsed_date = datetime.strptime(booking_date, "%Y-%m-%d").date()
+    except ValueError:
+        return JsonResponse({"error": "Invalid date format. Use YYYY-MM-DD."}, status=400)
+
+    if parsed_date < timezone.localdate():
+        return JsonResponse({"error": "Cannot book spaces for a past date."}, status=400)
+
+    start_time = data["start_time"].strip()
+    end_time = data["end_time"].strip()
+    if start_time >= end_time:
+        return JsonResponse({"error": "End time must be after start time."}, status=400)
+
+    attendees_count = data["attendees_count"]
+    if attendees_count > space.capacity:
+        return JsonResponse({
+            "error": f"The maximum capacity for {space.name} is {space.capacity} students."
+        }, status=400)
+
+    # Check for conflicts
+    existing_conflicts = SpaceBooking.objects.filter(
+        space=space,
+        booking_date=booking_date,
+        status__in=[SpaceBooking.CONFIRMED, SpaceBooking.PENDING],
+        start_time__lt=end_time,
+        end_time__gt=start_time,
+    )
+
+    if existing_conflicts.filter(status=SpaceBooking.CONFIRMED).exists():
+        return JsonResponse({
+            "error": f"{space.name} is already booked and confirmed between {start_time} and {end_time} on {booking_date}."
+        }, status=400)
+
+    if existing_conflicts.filter(status=SpaceBooking.PENDING).exists():
+        return JsonResponse({
+            "error": f"{space.name} already has a pending reservation request between {start_time} and {end_time} on {booking_date}."
+        }, status=400)
+
+    booking = SpaceBooking.objects.create(
+        space=space,
+        space_name=space.name,
+        space_type=space.space_type,
+        member=request.student_member,
+        student_name=request.student_member.name,
+        student_id=request.student_member.student_id,
+        student_email=request.student_member.email,
+        booking_date=booking_date,
+        start_time=start_time,
+        end_time=end_time,
+        attendees_count=attendees_count,
+        purpose=data.get("purpose", "").strip(),
+        status=SpaceBooking.PENDING,
+    )
+
+    return JsonResponse({
+        "message": f"Booking request for {space.name} submitted! It will be confirmed once a librarian approves it.",
+        "booking": space_booking_data(booking),
+    }, status=201)
+
+
+@student_api
+@require_GET
+def student_space_bookings(request):
+    bookings = SpaceBooking.objects.filter(member=request.student_member).order_by("-booking_date", "-start_time")
+    return JsonResponse({
+        "results": [space_booking_data(b) for b in bookings]
+    })
+
+
+@student_api
+@require_POST
+def cancel_space_booking(request, booking_id):
+    obj_id = to_object_id(booking_id)
+    booking = SpaceBooking.objects.filter(pk=obj_id, member=request.student_member).first() if obj_id else None
+    if not booking:
+        return JsonResponse({"error": "Booking not found."}, status=404)
+
+    if booking.status not in (SpaceBooking.PENDING, SpaceBooking.CONFIRMED):
+        return JsonResponse({"error": "Only pending or confirmed bookings can be cancelled."}, status=400)
+
+    booking.status = SpaceBooking.CANCELLED
+    booking.save(update_fields=["status"])
+    return JsonResponse({"message": f"Booking for {booking.space_name} cancelled."})
+
+
+@librarian_api
+@require_GET
+def librarian_space_bookings(request):
+    status_filter = request.GET.get("status", "").strip()
+    date_filter = request.GET.get("date", "").strip()
+    space_type = request.GET.get("type", "").strip()
+
+    queryset = SpaceBooking.objects.all().order_by("-created_at")
+    if status_filter and status_filter != "all":
+        queryset = queryset.filter(status=status_filter)
+    if date_filter:
+        queryset = queryset.filter(booking_date=date_filter)
+    if space_type and space_type != "all":
+        queryset = queryset.filter(space_type=space_type)
+
+    return JsonResponse({
+        "results": [space_booking_data(b) for b in queryset[:300]]
+    })
+
+
+@librarian_api
+@require_POST
+def review_space_booking(request, booking_id, action):
+    obj_id = to_object_id(booking_id)
+    booking = SpaceBooking.objects.filter(pk=obj_id).first() if obj_id else None
+    if not booking:
+        return JsonResponse({"error": "Booking not found."}, status=404)
+
+    if action not in ("approve", "reject"):
+        return JsonResponse({"error": "Action must be approve or reject."}, status=400)
+
+    if booking.status != SpaceBooking.PENDING:
+        return JsonResponse({"error": f"This booking is already {booking.status}."}, status=400)
+
+    if action == "approve":
+        # Check for another confirmed booking that overlaps
+        conflicts = SpaceBooking.objects.filter(
+            space=booking.space,
+            booking_date=booking.booking_date,
+            status=SpaceBooking.CONFIRMED,
+            start_time__lt=booking.end_time,
+            end_time__gt=booking.start_time,
+        ).exclude(pk=booking.pk)
+
+        if conflicts.exists():
+            return JsonResponse({
+                "error": f"Another booking is already confirmed for {booking.space_name} during this time."
+            }, status=400)
+
+        booking.status = SpaceBooking.CONFIRMED
+        booking.reviewed_at = timezone.now()
+        booking.reviewed_by = request.user
+        booking.save(update_fields=["status", "reviewed_at", "reviewed_by"])
+        return JsonResponse({
+            "message": f"Booking for {booking.space_name} confirmed successfully.",
+            "booking": space_booking_data(booking),
+        })
+
+    elif action == "reject":
+        reason = request.POST.get("reason", "").strip()
+        booking.status = SpaceBooking.REJECTED
+        booking.rejection_reason = reason or "Declined by librarian"
+        booking.reviewed_at = timezone.now()
+        booking.reviewed_by = request.user
+        booking.save(update_fields=["status", "rejection_reason", "reviewed_at", "reviewed_by"])
+        return JsonResponse({
+            "message": f"Booking request for {booking.space_name} rejected.",
+            "booking": space_booking_data(booking),
+        })
+
+    return JsonResponse({"error": "Unsupported review action."}, status=400)
+
+
+@require_POST
+def chat_assistant(request):
+    """Handles conversational questions from students/visitors via Gemini AI."""
+    student_member = None
+    if request.user.is_authenticated:
+        student_member = Member.objects.filter(
+            user=request.user,
+            approval_status=Member.APPROVED,
+        ).first()
+
+    try:
+        if request.content_type == "application/json":
+            payload = json.loads(request.body.decode("utf-8"))
+        else:
+            payload = request.POST
+    except Exception:
+        payload = request.POST
+
+    messages_raw = payload.get("messages")
+    if isinstance(messages_raw, str):
+        try:
+            messages = json.loads(messages_raw)
+        except Exception:
+            messages = [{"role": "user", "text": messages_raw}]
+    elif isinstance(messages_raw, list):
+        messages = messages_raw
+    else:
+        text = payload.get("message", "").strip() or payload.get("text", "").strip()
+        messages = [{"role": "user", "text": text}] if text else []
+
+    if not messages:
+        return JsonResponse({"error": "A message or question is required."}, status=400)
+
+    from library.gemini_service import call_gemini
+
+    reply_text = call_gemini(messages, student_member=student_member)
+
+    return JsonResponse({
+        "ok": True,
+        "reply": reply_text,
+    })
+
 

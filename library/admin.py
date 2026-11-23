@@ -3,7 +3,19 @@ from datetime import datetime, time, timedelta
 from django.contrib import admin
 from django.utils import timezone
 
-from .models import Book, BookCopy, BookReservation, Borrowing, FineEntry, LoanRenewalRequest, Member, Review, StudentSignupRequest
+from .models import (
+    Book,
+    BookCopy,
+    BookReservation,
+    Borrowing,
+    FineEntry,
+    LibrarySpace,
+    LoanRenewalRequest,
+    Member,
+    Review,
+    SpaceBooking,
+    StudentSignupRequest,
+)
 
 
 @admin.register(Book)
@@ -112,3 +124,18 @@ class FineEntryAdmin(admin.ModelAdmin):
     list_display = ("member_name", "student_id", "amount", "fine_type", "status", "created_at")
     search_fields = ("member_name", "student_id", "reason")
     list_filter = ("fine_type", "status")
+
+
+@admin.register(LibrarySpace)
+class LibrarySpaceAdmin(admin.ModelAdmin):
+    list_display = ("name", "space_type", "capacity", "location", "is_active")
+    search_fields = ("name", "location", "description")
+    list_filter = ("space_type", "is_active")
+
+
+@admin.register(SpaceBooking)
+class SpaceBookingAdmin(admin.ModelAdmin):
+    list_display = ("space_name", "booking_date", "start_time", "end_time", "student_name", "attendees_count", "status")
+    search_fields = ("space_name", "student_name", "student_id", "purpose")
+    list_filter = ("status", "space_type", "booking_date")
+

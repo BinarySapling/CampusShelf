@@ -2,12 +2,14 @@ import { useCallback, useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { api, formBody } from "./api.js";
 import Scanner from "./Scanner.jsx";
+import Chatbot from "./Chatbot.jsx";
 
 const librarianTabs = [
   ["overview", "Overview", "overview"],
   ["books", "Catalogue", "books"],
   ["add_book", "Add a title", "add_book"],
   ["reservations", "Book holds", "requests"],
+  ["space_bookings", "Space & Pods", "bookings"],
   ["renewals", "Renewals", "loans"],
   ["reports", "Reports", "overview"],
   ["requests", "Access requests", "requests"],
@@ -21,6 +23,7 @@ const librarianTabs = [
 
 const studentTabs = [
   ["catalogue", "Discover", "books"],
+  ["space_bookings", "Room & Pods", "bookings"],
   ["my_loans", "My loans", "loans"],
   ["my_history", "History", "loans"],
   ["my_holds", "My holds", "requests"],
@@ -55,6 +58,7 @@ function NavIcon({ name }) {
     overview: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
     books: <><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v17H6.5A2.5 2.5 0 0 0 4 22z" /><path d="M4 5.5v14A2.5 2.5 0 0 1 6.5 17H20M8 7h8" /></>,
     add_book: <><path d="M5 4h11a2 2 0 0 1 2 2v7" /><path d="M5 4v16h7M8 8h6M16 16h6M19 13v6" /></>,
+    bookings: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 10h18M8 2v4M16 2v4M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01" /></>,
     requests: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m4 7 8 6 8-6" /></>,
     students: <><path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="10" cy="7" r="4" /><path d="M20 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></>,
     loans: <><path d="M7 7h13l-3-3M20 7l-3 3M17 17H4l3 3M4 17l3-3" /></>,
@@ -101,33 +105,34 @@ function AuthScreen({ onLogin, onSetup, onSignup, setupAvailable }) {
       <section className="auth-card">
         <div className="auth-brand"><img src="/assets/campusshelf-emblem.png" alt="" /><div><b>CampusShelf</b><small>THE KNOWLEDGE CLUB</small></div></div>
         <span className="eyebrow">A CALMER KIND OF LIBRARY</span>
-        <h1>{mode === "signup" ? "Request student access" : mode === "setup" ? "Set up the library desk" : "Welcome back"}</h1>
-        <p className="muted">{mode === "signup" ? "Send your campus details to a librarian for approval." : mode === "setup" ? "Create the first librarian account to get started." : "Sign in to manage your reading and borrowing."}</p>
+        <h1>{mode === "signup" ? "Create student account" : mode === "setup" ? "Set up the library desk" : "Welcome back"}</h1>
+        <p className="muted">{mode === "signup" ? "Enter your campus details to create your library account immediately." : mode === "setup" ? "Create the first librarian account to get started." : "Sign in using your student ID, librarian ID, or email."}</p>
         {error && <div className="notice error">{error}</div>}
         <form className="stack-form" onSubmit={submit}>
           {mode === "signup" && <>
-            <label>Full name<input name="name" required maxLength="100" autoComplete="name" /></label>
-            <label>Campus email<input name="email" type="email" required maxLength="160" autoComplete="email" /></label>
-            <label>Registration number<input name="registration_number" required maxLength="50" /></label>
+            <label>Full name<input name="name" required maxLength="100" autoComplete="name" placeholder="e.g. Aarav Sharma" /></label>
+            <label>Campus email<input name="email" type="email" required maxLength="160" autoComplete="email" placeholder="e.g. student@campus.edu" /></label>
+            <label>Registration number<input name="registration_number" required maxLength="50" placeholder="e.g. REG-12345" /></label>
             <div className="two-fields"><label>Course<input name="course" required maxLength="60" placeholder="CSE" /></label><label>Year<select name="year" required defaultValue="1">{[1, 2, 3, 4, 5, 6].map((year) => <option key={year} value={year}>Year {year}</option>)}</select></label></div>
             <label>Password<input name="password" type="password" minLength="10" required autoComplete="new-password" /></label>
             <label>Confirm password<input name="confirm_password" type="password" minLength="10" required autoComplete="new-password" /></label>
           </>}
           {mode === "setup" && <>
             <label>Librarian name<input name="name" required maxLength="80" autoComplete="name" /></label>
+            <label>Email (optional)<input name="email" type="email" maxLength="160" autoComplete="email" placeholder="librarian@campus.edu" /></label>
             <label>First setup code<input name="setup_code" type="password" autoComplete="one-time-code" /></label>
             <label>Password<input name="password" type="password" minLength="10" required autoComplete="new-password" /></label>
           </>}
           {mode === "login" && <>
-            <label>Student ID or librarian ID<input name="login_id" required autoComplete="username" /></label>
+            <label>Student ID, librarian ID, or email<input name="login_id" required autoComplete="username" placeholder="e.g. STU-..., LIB-..., or name@campus.edu" /></label>
             <label>Password<input name="password" type="password" required autoComplete="current-password" /></label>
           </>}
-          <button className="button primary full" disabled={busy}>{busy ? "Please wait…" : mode === "signup" ? "Send approval request" : mode === "setup" ? "Create librarian account" : "Sign in"}</button>
+          <button className="button primary full" disabled={busy}>{busy ? "Please wait…" : mode === "signup" ? "Create student account" : mode === "setup" ? "Create librarian account" : "Sign in"}</button>
         </form>
         <div className="auth-links">
           {mode !== "login" && <button className="text-button" onClick={() => setMode("login")}>Back to sign in</button>}
           {mode === "login" && <>
-            <button className="text-button" onClick={() => setMode("signup")}>Student? Request access</button>
+            <button className="text-button" onClick={() => setMode("signup")}>New student? Create account</button>
             {setupAvailable && <button className="text-button muted-link" onClick={() => setMode("setup")}>First time? Set up librarian</button>}
           </>}
         </div>
@@ -759,6 +764,827 @@ function ReportsPage({ setNotice }) {
   </>;
 }
 
+const TIME_SLOTS = ["08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00", "20:00"];
+
+function getLocalDateStr(date = new Date()) {
+  const d = new Date(date);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function StudentSpaceBookingsPage({ user, setNotice }) {
+  const todayStr = getLocalDateStr();
+  const [subTab, setSubTab] = useState("browse");
+  const [selectedDate, setSelectedDate] = useState(todayStr);
+  const [spaceType, setSpaceType] = useState("all");
+  const [availFilter, setAvailFilter] = useState("all");
+  const [spaces, setSpaces] = useState([]);
+  const [myBookings, setMyBookings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [bookingModal, setBookingModal] = useState(null);
+  const [modalError, setModalError] = useState("");
+  const [bookingForm, setBookingForm] = useState({
+    date: todayStr,
+    start_time: "09:00",
+    end_time: "10:00",
+    attendees_count: 1,
+    purpose: "",
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [cancellingId, setCancellingId] = useState("");
+
+  async function loadData() {
+    setLoading(true);
+    try {
+      const [spacesData, bookingsData] = await Promise.all([
+        api(`/spaces/?date=${encodeURIComponent(selectedDate)}&type=${encodeURIComponent(spaceType)}`),
+        api("/student/space-bookings/"),
+      ]);
+      setSpaces(spacesData.results || []);
+      setMyBookings(bookingsData.results || []);
+    } catch (err) {
+      noticeText(setNotice, err.message, "error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadData();
+  }, [selectedDate, spaceType]);
+
+  function openBookingModal(space, presetSlot = null) {
+    setModalError("");
+    let firstEmpty = presetSlot;
+    if (!firstEmpty && space.schedule) {
+      firstEmpty = space.schedule.find((s) => s.status === "empty");
+    }
+    const startTime = firstEmpty ? firstEmpty.start : "09:00";
+    const validEnds = TIME_SLOTS.filter((t) => t > startTime);
+    const endTime = firstEmpty ? firstEmpty.end : (validEnds[0] || "10:00");
+    setBookingModal(space);
+    setBookingForm({
+      date: selectedDate || todayStr,
+      start_time: startTime,
+      end_time: endTime,
+      attendees_count: 1,
+      purpose: "",
+    });
+  }
+
+  function handleStartTimeChange(newStartTime) {
+    setModalError("");
+    const validEnds = TIME_SLOTS.filter((t) => t > newStartTime);
+    let nextEndTime = bookingForm.end_time;
+    if (!validEnds.includes(nextEndTime)) {
+      nextEndTime = validEnds[0] || "";
+    }
+    setBookingForm({
+      ...bookingForm,
+      start_time: newStartTime,
+      end_time: nextEndTime,
+    });
+  }
+
+  async function handleBookingSubmit(e) {
+    e.preventDefault();
+    if (!bookingModal) return;
+    setModalError("");
+
+    if (!bookingForm.date) {
+      setModalError("Please select a booking date.");
+      return;
+    }
+
+    if (bookingForm.date < todayStr) {
+      setModalError("Cannot book spaces for a past date.");
+      return;
+    }
+
+    if (bookingForm.start_time >= bookingForm.end_time) {
+      setModalError("End time must be after start time.");
+      return;
+    }
+
+    const attendees = Number(bookingForm.attendees_count) || 1;
+    if (attendees < 1) {
+      setModalError("Please enter at least 1 student.");
+      return;
+    }
+    if (attendees > bookingModal.capacity) {
+      setModalError(`Maximum capacity for ${bookingModal.name} is ${bookingModal.capacity} students.`);
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await api("/spaces/book/", {
+        method: "POST",
+        body: formBody({
+          space_id: bookingModal.id,
+          booking_date: bookingForm.date,
+          start_time: bookingForm.start_time,
+          end_time: bookingForm.end_time,
+          attendees_count: String(attendees),
+          purpose: bookingForm.purpose,
+        }),
+      });
+      noticeText(setNotice, res.message || "Booking request submitted! Waiting for librarian approval.");
+      setBookingModal(null);
+      await loadData();
+      setSubTab("my_bookings");
+    } catch (err) {
+      setModalError(err.message || "Failed to submit booking request.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleCancelBooking(booking) {
+    if (!confirm(`Cancel booking for ${booking.space_name} on ${booking.booking_date}?`)) return;
+    setCancellingId(booking.id);
+    try {
+      const res = await api(`/student/space-bookings/${booking.id}/cancel/`, {
+        method: "POST",
+        body: formBody({}),
+      });
+      noticeText(setNotice, res.message || "Booking cancelled.");
+      await loadData();
+    } catch (err) {
+      noticeText(setNotice, err.message, "error");
+    } finally {
+      setCancellingId("");
+    }
+  }
+
+  const filteredSpaces = spaces.filter((sp) => {
+    if (availFilter === "empty_only") return sp.empty_slots_count > 0;
+    if (availFilter === "occupied_only") return sp.occupied_slots_count > 0 || sp.pending_slots_count > 0;
+    return true;
+  });
+
+  const pendingCount = myBookings.filter((b) => b.status === "pending").length;
+
+  return (
+    <>
+      <PageTitle
+        eyebrow="STUDENT PORTAL / FACILITIES"
+        title="Study Pods & Conference Rooms"
+        note="Reserve quiet focus pods, duo study spaces, or conference rooms for your individual or group study sessions."
+      />
+
+      <div className="subnav-tabs">
+        <button
+          type="button"
+          className={`subnav-btn ${subTab === "browse" ? "active" : ""}`}
+          onClick={() => setSubTab("browse")}
+        >
+          Explore Spaces &amp; Slots
+        </button>
+        <button
+          type="button"
+          className={`subnav-btn ${subTab === "my_bookings" ? "active" : ""}`}
+          onClick={() => setSubTab("my_bookings")}
+        >
+          My Bookings {pendingCount > 0 && <span className="subnav-badge">{pendingCount} pending</span>}
+        </button>
+      </div>
+
+      {subTab === "browse" && (
+        <>
+          <div className="space-filters">
+            <div className="filter-group">
+              <label className="filter-item">
+                Date:
+                <input
+                  type="date"
+                  min={todayStr}
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                />
+              </label>
+              <label className="filter-item">
+                Type:
+                <select value={spaceType} onChange={(e) => setSpaceType(e.target.value)}>
+                  <option value="all">All Spaces</option>
+                  <option value="pod">Study Pods</option>
+                  <option value="room">Conference Rooms</option>
+                  <option value="slot">Study Slots</option>
+                </select>
+              </label>
+              <label className="filter-item">
+                Availability:
+                <select value={availFilter} onChange={(e) => setAvailFilter(e.target.value)}>
+                  <option value="all">Any Status</option>
+                  <option value="empty_only">Empty Slots Available</option>
+                  <option value="occupied_only">Occupied / In Use</option>
+                </select>
+              </label>
+            </div>
+            <button type="button" className="button light small" disabled={loading} onClick={loadData}>
+              {loading ? "Checking…" : "Refresh schedule"}
+            </button>
+          </div>
+
+          <div className="space-grid">
+            {filteredSpaces.map((space) => (
+              <article className="space-card" key={space.id}>
+                <div className="space-top">
+                  <div className="space-title-row">
+                    <h3>{space.name}</h3>
+                    <span className="pill">{space.space_type_display}</span>
+                  </div>
+                  <div className="space-meta">
+                    <span>📍 {space.location || "Library"}</span>
+                    <span>👥 Up to {space.capacity} {space.capacity === 1 ? "student" : "students"}</span>
+                  </div>
+                  {space.description && <p className="space-desc">{space.description}</p>}
+                  {space.amenities && (
+                    <div className="space-amenities-tags">
+                      {space.amenities.split(",").map((am, idx) => (
+                        <span className="amenity-tag" key={idx}>{am.trim()}</span>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="schedule-section">
+                    <div className="schedule-header">
+                      <b>Daily Timeline ({selectedDate})</b>
+                      <div className="schedule-legend">
+                        <span><i className="legend-dot empty" /> Empty</span>
+                        <span><i className="legend-dot pending" /> Review</span>
+                        <span><i className="legend-dot occupied" /> Booked</span>
+                      </div>
+                    </div>
+                    <div className="slot-grid">
+                      {(space.schedule || []).map((slot, idx) => (
+                        <div
+                          key={idx}
+                          className={`slot-pill ${slot.status}`}
+                          title={`${slot.start}-${slot.end}: ${slot.status === "empty" ? "Empty / Click to book" : slot.status === "pending" ? "Pending approval" : "Occupied"}`}
+                          onClick={() => {
+                            if (slot.status === "empty") openBookingModal(space, slot);
+                          }}
+                        >
+                          <span>{slot.start}</span>
+                          <small>{slot.status === "empty" ? "Empty" : slot.status === "pending" ? "Pending" : "Booked"}</small>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-card-foot">
+                  <div className="space-summary-pills">
+                    <span className="summary-pill empty">{space.empty_slots_count} Empty</span>
+                    {space.occupied_slots_count > 0 && <span className="summary-pill occupied">{space.occupied_slots_count} Booked</span>}
+                    {space.pending_slots_count > 0 && <span className="summary-pill pending">{space.pending_slots_count} Review</span>}
+                  </div>
+                  <button
+                    type="button"
+                    className="button primary small"
+                    disabled={space.empty_slots_count === 0}
+                    onClick={() => openBookingModal(space)}
+                  >
+                    {space.empty_slots_count === 0 ? "Fully Booked" : "Book Slot"}
+                  </button>
+                </div>
+              </article>
+            ))}
+            {loading && <p className="empty">Checking space schedules…</p>}
+            {!loading && filteredSpaces.length === 0 && (
+              <p className="empty">No spaces match the selected filters.</p>
+            )}
+          </div>
+        </>
+      )}
+
+      {subTab === "my_bookings" && (
+        <section className="panel">
+          <div className="panel-head">
+            <div>
+              <span className="eyebrow">RESERVATIONS</span>
+              <h3>Your Bookings &amp; Requests</h3>
+            </div>
+            <button type="button" className="button light small" disabled={loading} onClick={loadData}>
+              {loading ? "Loading…" : "Refresh"}
+            </button>
+          </div>
+
+          <div className="booking-list">
+            {myBookings.map((b) => (
+              <article className="booking-row-card" key={b.id}>
+                <div className="booking-card-main">
+                  <div className={`booking-card-icon ${b.space_type || "pod"}`}>
+                    {b.space_type === "room" ? "🏛️" : b.space_type === "pod" ? "🎧" : "📖"}
+                  </div>
+                  <div className="booking-card-details">
+                    <b>{b.space_name}</b>
+                    <div className="time-line">
+                      📅 {b.booking_date} · ⏰ {b.start_time} - {b.end_time}
+                    </div>
+                    <div className="sub-line">
+                      <span>👥 {b.attendees_count} {b.attendees_count === 1 ? "student" : "students"}</span>
+                      <span>Requested {new Date(b.created_at).toLocaleDateString()}</span>
+                    </div>
+                    {b.purpose && <p className="purpose-note">“{b.purpose}”</p>}
+                    {b.status === "rejected" && b.rejection_reason && (
+                      <p className="rejection-note" style={{ color: "var(--red)", fontSize: "9px", marginTop: "4px" }}>
+                        Reason: {b.rejection_reason}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="booking-card-status-col">
+                  <span className={`status ${b.status}`}>
+                    {b.status === "pending"
+                      ? "Pending Approval"
+                      : b.status === "confirmed"
+                      ? "Confirmed"
+                      : b.status === "rejected"
+                      ? "Rejected"
+                      : b.status}
+                  </span>
+                  {["pending", "confirmed"].includes(b.status) && (
+                    <button
+                      type="button"
+                      className="button danger small"
+                      disabled={cancellingId === b.id}
+                      onClick={() => handleCancelBooking(b)}
+                    >
+                      {cancellingId === b.id ? "Cancelling…" : "Cancel booking"}
+                    </button>
+                  )}
+                </div>
+              </article>
+            ))}
+            {loading && <p className="empty">Loading your space bookings…</p>}
+            {!loading && myBookings.length === 0 && (
+              <p className="empty">You haven't requested any space or pod bookings yet.</p>
+            )}
+          </div>
+        </section>
+      )}
+
+      {bookingModal && (
+        <div className="booking-modal-overlay" onClick={() => !submitting && setBookingModal(null)}>
+          <div className="booking-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="booking-modal-header">
+              <div>
+                <span className="eyebrow">{bookingModal.space_type_display}</span>
+                <h3>Book {bookingModal.name}</h3>
+                <p>📍 {bookingModal.location} · Max capacity: {bookingModal.capacity} students</p>
+              </div>
+              <button
+                type="button"
+                className="modal-close-btn"
+                disabled={submitting}
+                onClick={() => setBookingModal(null)}
+              >
+                ×
+              </button>
+            </div>
+
+            <form className="stack-form" onSubmit={handleBookingSubmit}>
+              {modalError && (
+                <div
+                  className="notice error"
+                  style={{
+                    margin: "0 0 14px",
+                    padding: "9px 12px",
+                    borderRadius: "6px",
+                    fontSize: "12px",
+                    fontWeight: "500",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                  }}
+                >
+                  <span>⚠️</span>
+                  <span>{modalError}</span>
+                </div>
+              )}
+
+              <label>
+                Booking Date
+                <input
+                  type="date"
+                  min={todayStr}
+                  required
+                  value={bookingForm.date}
+                  onChange={(e) => {
+                    setModalError("");
+                    setBookingForm({ ...bookingForm, date: e.target.value });
+                  }}
+                />
+              </label>
+
+              <div className="two-fields">
+                <label>
+                  Start Time
+                  <select
+                    value={bookingForm.start_time}
+                    onChange={(e) => handleStartTimeChange(e.target.value)}
+                  >
+                    {TIME_SLOTS.slice(0, -1).map((t) => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  End Time
+                  <select
+                    value={bookingForm.end_time}
+                    onChange={(e) => {
+                      setModalError("");
+                      setBookingForm({ ...bookingForm, end_time: e.target.value });
+                    }}
+                  >
+                    {TIME_SLOTS.filter((t) => t > bookingForm.start_time).map((t) => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <label>
+                How many students will use this space?
+                <input
+                  type="number"
+                  min="1"
+                  max={bookingModal.capacity}
+                  required
+                  value={bookingForm.attendees_count}
+                  onChange={(e) => {
+                    setModalError("");
+                    setBookingForm({ ...bookingForm, attendees_count: parseInt(e.target.value) || 1 });
+                  }}
+                />
+                <small className="muted" style={{ fontSize: "9px" }}>
+                  Selected capacity: 1 to {bookingModal.capacity} students
+                </small>
+              </label>
+
+              <label>
+                Purpose / Study Topic (optional)
+                <input
+                  maxLength="250"
+                  placeholder="e.g. Group exam study, team presentation practice"
+                  value={bookingForm.purpose}
+                  onChange={(e) => setBookingForm({ ...bookingForm, purpose: e.target.value })}
+                />
+              </label>
+
+              <div className="auth-note" style={{ margin: "4px 0" }}>
+                <span>ℹ️</span> When submitted, this request goes to the librarian portal for approval. Once a librarian approves it, your slot is confirmed!
+              </div>
+
+              <div className="two-fields" style={{ marginTop: "12px" }}>
+                <button
+                  type="button"
+                  className="button light"
+                  disabled={submitting}
+                  onClick={() => setBookingModal(null)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="button primary" disabled={submitting}>
+                  {submitting ? "Booking Slot…" : "Book Slot (Send for Approval)"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function LibrarianSpaceBookingsPage({ setNotice }) {
+  const [bookings, setBookings] = useState([]);
+  const [spaces, setSpaces] = useState([]);
+  const [subTab, setSubTab] = useState("requests");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [dateFilter, setDateFilter] = useState("");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [scheduleDate, setScheduleDate] = useState(getLocalDateStr());
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState("");
+  const [rejectingBooking, setRejectingBooking] = useState(null);
+  const [rejectReason, setRejectReason] = useState("");
+
+  async function loadData() {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (statusFilter && statusFilter !== "all") params.append("status", statusFilter);
+      if (dateFilter) params.append("date", dateFilter);
+      if (typeFilter && typeFilter !== "all") params.append("type", typeFilter);
+
+      const [bookingsData, spacesData] = await Promise.all([
+        api(`/librarian/space-bookings/?${params}`),
+        api(`/spaces/?date=${encodeURIComponent(scheduleDate)}`),
+      ]);
+      setBookings(bookingsData.results || []);
+      setSpaces(spacesData.results || []);
+    } catch (err) {
+      noticeText(setNotice, err.message, "error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadData();
+  }, [statusFilter, dateFilter, typeFilter, scheduleDate]);
+
+  async function review(booking, action, reason = "") {
+    setBusyId(booking.id);
+    try {
+      const res = await api(`/librarian/space-bookings/${booking.id}/${action}/`, {
+        method: "POST",
+        body: formBody({ reason }),
+      });
+      noticeText(setNotice, res.message || `Booking ${action === "approve" ? "confirmed" : "rejected"}.`);
+      setRejectingBooking(null);
+      setRejectReason("");
+      await loadData();
+    } catch (err) {
+      noticeText(setNotice, err.message, "error");
+    } finally {
+      setBusyId("");
+    }
+  }
+
+  const pendingList = bookings.filter((b) => b.status === "pending");
+  const confirmedList = bookings.filter((b) => b.status === "confirmed");
+
+  return (
+    <>
+      <PageTitle
+        eyebrow="LIBRARY DESK / RESERVATIONS"
+        title="Space & Pod Bookings"
+        note="Review student booking requests for study pods, conference rooms, and research slots."
+        action={
+          <button type="button" className="button light" disabled={loading} onClick={loadData}>
+            {loading ? "Refreshing…" : "Refresh"}
+          </button>
+        }
+      />
+
+      <div className="stats-grid">
+        <StatCard label="Pending Approval" value={pendingList.length} note="Requests waiting for review" />
+        <StatCard label="Confirmed Bookings" value={confirmedList.length} note="Active confirmed reservations" />
+        <StatCard label="Total Library Spaces" value={spaces.length || 10} note="Pods, rooms & slots" />
+      </div>
+
+      <div className="subnav-tabs">
+        <button
+          type="button"
+          className={`subnav-btn ${subTab === "requests" ? "active" : ""}`}
+          onClick={() => setSubTab("requests")}
+        >
+          Booking Requests {pendingList.length > 0 && <span className="subnav-badge">{pendingList.length} pending</span>}
+        </button>
+        <button
+          type="button"
+          className={`subnav-btn ${subTab === "schedule" ? "active" : ""}`}
+          onClick={() => setSubTab("schedule")}
+        >
+          Live Spaces &amp; Availability
+        </button>
+      </div>
+
+      {subTab === "requests" && (
+        <section className="panel">
+          <div className="space-filters" style={{ margin: "0 0 16px" }}>
+            <div className="filter-group">
+              <label className="filter-item">
+                Status:
+                <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+                  <option value="all">All Statuses</option>
+                  <option value="pending">Pending Approval</option>
+                  <option value="confirmed">Confirmed</option>
+                  <option value="rejected">Rejected</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+              </label>
+              <label className="filter-item">
+                Date:
+                <input
+                  type="date"
+                  value={dateFilter}
+                  onChange={(e) => setDateFilter(e.target.value)}
+                />
+              </label>
+              {dateFilter && (
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => setDateFilter("")}
+                  style={{ fontSize: "10px" }}
+                >
+                  Clear date
+                </button>
+              )}
+              <label className="filter-item">
+                Type:
+                <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+                  <option value="all">All Types</option>
+                  <option value="pod">Pods</option>
+                  <option value="room">Conference Rooms</option>
+                  <option value="slot">Slots</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <div className="booking-list">
+            {bookings.map((b) => (
+              <article className="booking-row-card" key={b.id}>
+                <div className="booking-card-main">
+                  <div className={`booking-card-icon ${b.space_type || "pod"}`}>
+                    {b.space_type === "room" ? "🏛️" : b.space_type === "pod" ? "🎧" : "📖"}
+                  </div>
+                  <div className="booking-card-details">
+                    <b>{b.space_name}</b>
+                    <div className="time-line">
+                      📅 {b.booking_date} · ⏰ {b.start_time} - {b.end_time}
+                    </div>
+                    <div className="sub-line">
+                      <span>👤 <strong>{b.student_name}</strong> ({b.student_id})</span>
+                      <span>📧 {b.student_email}</span>
+                      <span>👥 {b.attendees_count} student(s)</span>
+                      <span>Requested {new Date(b.created_at).toLocaleDateString()}</span>
+                    </div>
+                    {b.purpose && <p className="purpose-note">Purpose: “{b.purpose}”</p>}
+                    {b.rejection_reason && (
+                      <p style={{ color: "var(--red)", fontSize: "9.5px", marginTop: "3px" }}>
+                        Declined: {b.rejection_reason}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="booking-card-status-col">
+                  <span className={`status ${b.status}`}>
+                    {b.status === "pending"
+                      ? "Pending Approval"
+                      : b.status === "confirmed"
+                      ? "Confirmed"
+                      : b.status === "rejected"
+                      ? "Rejected"
+                      : b.status}
+                  </span>
+                  {b.status === "pending" && (
+                    <div className="row-actions">
+                      <button
+                        type="button"
+                        className="button primary small"
+                        disabled={Boolean(busyId)}
+                        onClick={() => review(b, "approve")}
+                      >
+                        {busyId === b.id ? "Saving…" : "Approve & Confirm"}
+                      </button>
+                      <button
+                        type="button"
+                        className="button danger small"
+                        disabled={Boolean(busyId)}
+                        onClick={() => {
+                          setRejectingBooking(b);
+                          setRejectReason("");
+                        }}
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </article>
+            ))}
+            {loading && <p className="empty">Loading requests…</p>}
+            {!loading && bookings.length === 0 && (
+              <p className="empty">No booking requests found for the selected filter.</p>
+            )}
+          </div>
+        </section>
+      )}
+
+      {subTab === "schedule" && (
+        <section className="panel">
+          <div className="space-filters" style={{ margin: "0 0 18px" }}>
+            <label className="filter-item">
+              Check Schedule Date:
+              <input
+                type="date"
+                value={scheduleDate}
+                onChange={(e) => setScheduleDate(e.target.value)}
+              />
+            </label>
+          </div>
+
+          <div className="space-grid">
+            {spaces.map((sp) => (
+              <article className="space-card" key={sp.id}>
+                <div className="space-top">
+                  <div className="space-title-row">
+                    <h3>{sp.name}</h3>
+                    <span className="pill">{sp.space_type_display}</span>
+                  </div>
+                  <div className="space-meta">
+                    <span>📍 {sp.location}</span>
+                    <span>👥 Up to {sp.capacity} students</span>
+                  </div>
+                  <div className="schedule-section">
+                    <div className="schedule-header">
+                      <b>Hourly Occupancy ({scheduleDate})</b>
+                      <div className="schedule-legend">
+                        <span><i className="legend-dot empty" /> Empty</span>
+                        <span><i className="legend-dot pending" /> Pending</span>
+                        <span><i className="legend-dot occupied" /> Booked</span>
+                      </div>
+                    </div>
+                    <div className="slot-grid">
+                      {(sp.schedule || []).map((slot, idx) => (
+                        <div key={idx} className={`slot-pill ${slot.status}`}>
+                          <span>{slot.start}</span>
+                          <small>{slot.status === "empty" ? "Empty" : slot.status === "pending" ? "Pending" : "Booked"}</small>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="space-card-foot">
+                  <div className="space-summary-pills">
+                    <span className="summary-pill empty">{sp.empty_slots_count} Empty</span>
+                    {sp.occupied_slots_count > 0 && <span className="summary-pill occupied">{sp.occupied_slots_count} Booked</span>}
+                    {sp.pending_slots_count > 0 && <span className="summary-pill pending">{sp.pending_slots_count} Review</span>}
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {rejectingBooking && (
+        <div className="booking-modal-overlay" onClick={() => setRejectingBooking(null)}>
+          <div className="booking-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="booking-modal-header">
+              <div>
+                <span className="eyebrow">DECLINE REQUEST</span>
+                <h3>Reject Booking Request</h3>
+                <p>{rejectingBooking.space_name} · {rejectingBooking.booking_date} ({rejectingBooking.start_time} - {rejectingBooking.end_time})</p>
+              </div>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => setRejectingBooking(null)}
+              >
+                ×
+              </button>
+            </div>
+            <form
+              className="stack-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                review(rejectingBooking, "reject", rejectReason);
+              }}
+            >
+              <label>
+                Reason for rejection (optional)
+                <textarea
+                  rows="3"
+                  maxLength="250"
+                  placeholder="e.g. Space undergoes scheduled maintenance, or overlaps with library event"
+                  value={rejectReason}
+                  onChange={(e) => setRejectReason(e.target.value)}
+                />
+              </label>
+              <div className="two-fields" style={{ marginTop: "10px" }}>
+                <button
+                  type="button"
+                  className="button light"
+                  onClick={() => setRejectingBooking(null)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="button danger" disabled={Boolean(busyId)}>
+                  {busyId ? "Rejecting…" : "Confirm Rejection"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+
 function StudentPortal({ user, tab, setTab, setNotice, selectedBook, onOpenBook, onBackToBooks, onBookRatingChange }) {
   const [books, setBooks] = useState([]);
   const [loans, setLoans] = useState([]);
@@ -870,6 +1696,8 @@ function StudentPortal({ user, tab, setTab, setNotice, selectedBook, onOpenBook,
 
   const dueAlerts = loans.filter((loan) => ["due_soon", "overdue"].includes(loan.due_status));
 
+  if (tab === "space_bookings") return <StudentSpaceBookingsPage user={user} setNotice={setNotice} />;
+
   if (tab === "catalogue") return <>
     <section className="student-welcome"><div><span className="eyebrow">YOUR CAMPUS LIBRARY</span><h2>Hello, {user.name.split(" ")[0]}.</h2><p>Find a title that interests you, then check out the exact copy from its QR label.</p></div><div className="welcome-mark" aria-hidden="true"><span>YOUR NEXT</span><b>read</b><span>STARTS HERE</span></div></section>
     {slip && <IssueSlip loan={slip} onClose={() => setSlip(null)} />}
@@ -948,6 +1776,10 @@ export default function App() {
 
   async function signup(values) {
     const result = await api("/signup/", { method: "POST", body: formBody(values) });
+    if (result.user) {
+      setUser(result.user);
+      setTab("catalogue");
+    }
     noticeText(setNotice, result.message);
   }
 
@@ -964,7 +1796,7 @@ export default function App() {
   }
 
   if (loading) return <main className="loading-screen"><img src="/assets/campusshelf-emblem.png" alt="" /><span>Opening the library…</span></main>;
-  if (!user) return <><AuthScreen onLogin={signIn} onSetup={setup} onSignup={signup} setupAvailable={setupAvailable} />{notice && <div className={`toast ${notice.kind}`}>{notice.text}</div>}</>;
+  if (!user) return <><AuthScreen onLogin={signIn} onSetup={setup} onSignup={signup} setupAvailable={setupAvailable} />{notice && <div className={`toast ${notice.kind}`}>{notice.text}</div>}<Chatbot user={null} /></>;
 
   const isStudent = user.role === "student";
   const tabs = isStudent ? studentTabs : librarianTabs;
@@ -981,6 +1813,7 @@ export default function App() {
   else if (tab === "book_detail" && selectedBook) content = <BookDetailPage key={selectedBook.id} book={selectedBook} setNotice={setNotice} onBack={() => setTab("books")} onEdit={(book) => { setSelectedBook(book); setTab("edit_book"); }} />;
   else if (tab === "book_detail") content = <BooksPage setNotice={setNotice} onAddBook={() => setTab("add_book")} onOpenBook={(book) => { setSelectedBook(book); setTab("book_detail"); }} />;
   else if (tab === "requests") content = <RequestsPage setNotice={setNotice} />;
+  else if (tab === "space_bookings") content = <LibrarianSpaceBookingsPage setNotice={setNotice} />;
   else if (tab === "reservations") content = <ReservationsPage setNotice={setNotice} />;
   else if (tab === "renewals") content = <RenewalsPage setNotice={setNotice} />;
   else if (tab === "transactions") content = <TransactionsPage setNotice={setNotice} />;
@@ -1002,5 +1835,6 @@ export default function App() {
       {notice && <div className={`notice ${notice.kind}`} role="status">{notice.text}<button onClick={() => setNotice(null)}>×</button></div>}
       <div className="page-content">{content}</div>
     </main>
+    <Chatbot user={user} />
   </div>;
 }

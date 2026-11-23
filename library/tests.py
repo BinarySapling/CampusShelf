@@ -5,7 +5,19 @@ from django.contrib.auth.models import Group
 from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
-from .models import Book, BookCopy, BookReservation, Borrowing, FineEntry, LoanRenewalRequest, Member, Review, StudentSignupRequest
+from .models import (
+    Book,
+    BookCopy,
+    BookReservation,
+    Borrowing,
+    FineEntry,
+    LibrarySpace,
+    LoanRenewalRequest,
+    Member,
+    Review,
+    SpaceBooking,
+    StudentSignupRequest,
+)
 from .views import copy_code_for, mark_overdue, overdue_fine
 
 
@@ -324,26 +336,28 @@ class CampusShelfFeatureApiTests(TestCase):
             "confirm_password": "NewStudentPass123!",
         })
         self.assertEqual(response.status_code, 201)
-        signup = StudentSignupRequest.objects.get(email="new.reader@campus.edu")
-        self.assertFalse(signup.user.is_active)
-        self.assertFalse(Member.objects.filter(email=signup.email).exists())
-
-        approval = self.staff_client.post(f"/api/requests/{signup.id}/approve/")
-        self.assertEqual(approval.status_code, 200)
-        signup.refresh_from_db()
-        signup.user.refresh_from_db()
-        member = Member.objects.get(email=signup.email)
-        self.assertEqual(signup.status, StudentSignupRequest.APPROVED)
-        self.assertEqual(signup.user.username, member.student_id)
-        self.assertTrue(signup.user.is_active)
+        member = Member.objects.get(email="new.reader@campus.edu")
+        self.assertEqual(member.approval_status, Member.APPROVED)
+        self.assertTrue(member.user.is_active)
+        self.assertEqual(member.user.username, member.student_id)
 
         student_client = Client()
-        login = student_client.post("/api/auth/login/", {
+        # Login with Student ID
+        login_by_id = student_client.post("/api/auth/login/", {
             "login_id": member.student_id,
             "password": "NewStudentPass123!",
         })
-        self.assertEqual(login.status_code, 200)
-        self.assertEqual(login.json()["user"]["role"], "student")
+        self.assertEqual(login_by_id.status_code, 200)
+        self.assertEqual(login_by_id.json()["user"]["role"], "student")
+
+        # Login with Email
+        login_by_email = student_client.post("/api/auth/login/", {
+            "login_id": "new.reader@campus.edu",
+            "password": "NewStudentPass123!",
+        })
+        self.assertEqual(login_by_email.status_code, 200)
+        self.assertEqual(login_by_email.json()["user"]["role"], "student")
+
 
     def test_librarian_can_get_qr_details_for_every_copy(self):
         other_book = Book.objects.create(
@@ -1121,4 +1135,105 @@ class CampusShelfFeatureApiTests(TestCase):
         self.assertEqual(self.copy.status, BookCopy.AVAILABLE)
         self.book.refresh_from_db()
         self.assertEqual(self.book.copies, 1)
+
+    def test_student_and_librarian_can_login_using_email(self):
+        client = Client()
+        member, _ = self.make_student("EMAIL")
+
+        # 1. Student login using email
+        student_login = client.post("/api/auth/login/", {
+            "login_id": member.email,
+            "password": "StudentPass123!",
+        })
+        self.assertEqual(student_login.status_code, 200)
+        self.assertEqual(student_login.json()["user"]["role"], "student")
+        self.assertEqual(student_login.json()["user"]["student_id"], member.student_id)
+
+        # 2. Librarian login using email
+        self.staff.email = "librarian.desk@campus.edu"
+        self.staff.save(update_fields=["email"])
+
+        librarian_login = client.post("/api/auth/login/", {
+            "login_id": "librarian.desk@campus.edu",
+            "password": "StrongPass123!",
+        })
+        self.assertEqual(librarian_login.status_code, 200)
+        self.assertEqual(librarian_login.json()["user"]["role"], "librarian")
+
+    def test_space_booking_and_librarian_approval_flow(self):
+        tomorrow = (timezone.localdate() + timedelta(days=1)).isoformat()
+        member, student_client = self.make_student("SPACE")
+
+        # Ensure spaces exist
+        from library.api import ensure_default_spaces
+        ensure_default_spaces()
+
+        # 1. Spaces list shows spaces and initial empty slots
+        spaces_res = student_client.get(f"/api/spaces/?date={tomorrow}")
+        self.assertEqual(spaces_res.status_code, 200)
+        spaces_data = spaces_res.json()["results"]
+        self.assertTrue(len(spaces_data) >= 1)
+
+        target_space = next(s for s in spaces_data if s["space_type"] == "room")
+        space_id = target_space["id"]
+
+        # 2. Student booking with attendees exceeding capacity is rejected
+        excessive_booking = student_client.post("/api/spaces/book/", {
+            "space_id": space_id,
+            "booking_date": tomorrow,
+            "start_time": "10:00",
+            "end_time": "12:00",
+            "attendees_count": target_space["capacity"] + 5,
+            "purpose": "Big crowd",
+        })
+        self.assertEqual(excessive_booking.status_code, 400)
+        self.assertIn("capacity", excessive_booking.json()["error"])
+
+        # 3. Valid booking creates pending request
+        valid_booking = student_client.post("/api/spaces/book/", {
+            "space_id": space_id,
+            "booking_date": tomorrow,
+            "start_time": "10:00",
+            "end_time": "12:00",
+            "attendees_count": 4,
+            "purpose": "Team project review",
+        })
+        self.assertEqual(valid_booking.status_code, 201)
+        booking_id = valid_booking.json()["booking"]["id"]
+        self.assertEqual(valid_booking.json()["booking"]["status"], SpaceBooking.PENDING)
+
+        # 4. Check schedule: slots 10:00-11:00 and 11:00-12:00 are marked pending
+        schedule_res = student_client.get(f"/api/spaces/?date={tomorrow}")
+        updated_space = next(s for s in schedule_res.json()["results"] if s["id"] == space_id)
+        slot_10 = next(sl for sl in updated_space["schedule"] if sl["start"] == "10:00")
+        self.assertEqual(slot_10["status"], "pending")
+
+        # 5. Overlapping booking request is blocked
+        overlap_booking = student_client.post("/api/spaces/book/", {
+            "space_id": space_id,
+            "booking_date": tomorrow,
+            "start_time": "11:00",
+            "end_time": "13:00",
+            "attendees_count": 2,
+            "purpose": "Overlap attempt",
+        })
+        self.assertEqual(overlap_booking.status_code, 400)
+
+        # 6. Booking is listed in librarian portal
+        lib_bookings = self.staff_client.get("/api/librarian/space-bookings/?status=pending")
+        self.assertEqual(lib_bookings.status_code, 200)
+        self.assertTrue(any(b["id"] == booking_id for b in lib_bookings.json()["results"]))
+
+        # 7. Librarian approves booking -> status becomes confirmed!
+        approval_res = self.staff_client.post(f"/api/librarian/space-bookings/{booking_id}/approve/")
+        self.assertEqual(approval_res.status_code, 200)
+        self.assertEqual(approval_res.json()["booking"]["status"], SpaceBooking.CONFIRMED)
+
+        # 8. Check schedule: slot 10:00-11:00 is now confirmed as occupied!
+        occupied_schedule = student_client.get(f"/api/spaces/?date={tomorrow}")
+        occupied_space = next(s for s in occupied_schedule.json()["results"] if s["id"] == space_id)
+        slot_10_after = next(sl for sl in occupied_space["schedule"] if sl["start"] == "10:00")
+        self.assertEqual(slot_10_after["status"], "occupied")
+
+
 

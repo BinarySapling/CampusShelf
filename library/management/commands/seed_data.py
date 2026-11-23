@@ -22,6 +22,11 @@ class Command(BaseCommand):
         else:
             self.stdout.write("Students already exist; leaving the directory unchanged.")
 
+        from library.api import ensure_default_spaces
+        ensure_default_spaces()
+        self.stdout.write(self.style.SUCCESS("Ensured default library spaces and pods exist."))
+
+
     def add_sample_books(self):
         sample_books = [
             ("Atomic Habits", "James Clear", "Self Growth", "9780735211292", 4, "A-01"),
