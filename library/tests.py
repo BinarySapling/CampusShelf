@@ -735,6 +735,40 @@ class CampusShelfFeatureApiTests(TestCase):
         self.assertEqual(fine.status, FineEntry.PAID)
         self.assertIsNotNone(fine.paid_at)
 
+    def test_rating_only_submission_with_legacy_mongo_validator(self):
+        from copy import deepcopy
+        from importlib import import_module
+        from django.db import connection
+        from types import SimpleNamespace
+        member, student = self.make_student("OPTIONALNOTE")
+        legacy = {"$jsonSchema": {"bsonType": "object",
+            "required": ["book_id", "book_title", "member_id", "member_name", "rating", "comment"],
+            "properties": {"book_id": {"bsonType": ["objectId", "null"]},
+                "member_id": {"bsonType": ["objectId", "null"]},
+                "rating": {"bsonType": ["int", "long"], "minimum": 1, "maximum": 5},
+                "comment": {"bsonType": "string", "minLength": 1}}}}
+        collection = connection.database["reviews"]
+        original = deepcopy(collection.options().get("validator", {}))
+        try:
+            connection.database.command("collMod", "reviews", validator=legacy)
+            migrate = import_module("library.migrations.0009_allow_optional_review_comment").allow_optional_review_comment
+            migrate(None, SimpleNamespace(connection=connection))
+            migrate(None, SimpleNamespace(connection=connection))
+            validator = collection.options()["validator"]["$jsonSchema"]["properties"]
+            self.assertEqual(validator["comment"]["minLength"], 0)
+            self.assertEqual(validator["rating"]["maximum"], 5)
+            created = student.post("/api/student/reviews/", {"book_id": str(self.book.pk), "rating": 5})
+            self.assertEqual(created.status_code, 201)
+            updated = student.post("/api/student/reviews/", {"book_id": str(self.book.pk), "rating": 4, "comment": "   "})
+            self.assertEqual(updated.status_code, 200)
+            public = Client().get(f"/api/books/{self.book.pk}/reviews/").json()
+            self.assertEqual(public["average_rating"], 4)
+            self.assertEqual(public["rating_count"], 1)
+            self.assertEqual(public["results"][0]["comment"], "")
+            self.assertEqual(student.post("/api/student/reviews/", {"book_id": str(self.book.pk), "rating": 6}).status_code, 400)
+        finally:
+            connection.database.command("collMod", "reviews", validator=original)
+
     def test_student_can_publish_and_update_a_public_book_rating(self):
         student_group, _ = Group.objects.get_or_create(name="Students")
         student_user = User.objects.create_user(

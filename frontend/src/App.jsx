@@ -619,6 +619,7 @@ function StudentBookReviews({ book, setNotice, onRatingChange }) {
   const [hasReview, setHasReview] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [feedback, setFeedback] = useState(null);
 
   async function load() {
     setLoading(true);
@@ -640,7 +641,7 @@ function StudentBookReviews({ book, setNotice, onRatingChange }) {
 
   async function submit(event) {
     event.preventDefault();
-    const form = event.currentTarget;
+    setFeedback(null);
     setBusy(true);
     try {
       const result = await api("/student/reviews/", {
@@ -648,8 +649,11 @@ function StudentBookReviews({ book, setNotice, onRatingChange }) {
         body: formBody({ book_id: book.id, rating: String(rating), comment }),
       });
       noticeText(setNotice, result.message);
-      await load();
+      setFeedback({ kind: "success", text: result.message });
+      try { await load(); }
+      catch { setFeedback({ kind: "error", text: "Your rating was saved, but the review list could not refresh. Use Refresh to reload it." }); }
     } catch (error) {
+      setFeedback({ kind: "error", text: error.message });
       noticeText(setNotice, error.message, "error");
     } finally {
       setBusy(false);
@@ -660,6 +664,7 @@ function StudentBookReviews({ book, setNotice, onRatingChange }) {
     <div className="panel-head"><div><span className="eyebrow">PUBLIC READER RATINGS</span><h3>What readers think</h3></div><button className="button light small" disabled={loading} onClick={() => load().catch((error) => noticeText(setNotice, error.message, "error"))}>{loading ? "Loading…" : "Refresh"}</button></div>
     <div className="reader-rating-overview"><strong>{ratingCount ? average.toFixed(1) : "—"}</strong><div><BookRating rating={average} count={ratingCount} /><small>{ratingCount ? `Based on ${ratingCount} student rating${ratingCount === 1 ? "" : "s"}` : "No one has rated this book yet."}</small></div></div>
     <form className="student-review-form" onSubmit={submit}>
+      {feedback && <div className={`notice ${feedback.kind}`} role={feedback.kind === "error" ? "alert" : "status"}>{feedback.text}</div>}
       <fieldset className="rating-picker" disabled={busy || loading}>
         <legend>{hasReview ? "Update your rating" : "Your rating"}</legend>
         <div>{[1, 2, 3, 4, 5].map((star) => <button key={star} type="button" className={star <= rating ? "selected" : ""} aria-label={`Rate ${star} out of 5 stars`} aria-pressed={rating === star} onClick={() => setRating(star)}>★</button>)}</div>
