@@ -3,6 +3,9 @@ import { QRCodeSVG } from "qrcode.react";
 import { api, formBody } from "./api.js";
 import Scanner from "./Scanner.jsx";
 import Chatbot from "./Chatbot.jsx";
+import LibraryArt from "./LibraryArt.jsx";
+import { AnimatePresence, LazyMotion, domAnimation, m, useReducedMotion } from "motion/react";
+import { BookOpen, CalendarDays, ChartNoAxesCombined, CircleUserRound, ClipboardList, LayoutDashboard, LibraryBig, MapPin, Menu, Plus, Receipt, Repeat2, Sparkles, Star, Users, X } from "lucide-react";
 
 const librarianTabs = [
   ["overview", "Overview", "overview"],
@@ -37,7 +40,7 @@ function noticeText(setNotice, text, kind = "success") {
 }
 
 function StatCard({ label, value, note }) {
-  return <article className="stat-card"><span>{label}</span><strong>{value ?? "—"}</strong><small>{note}</small></article>;
+  return <article className="stat-card"><div className="stat-symbol"><ChartNoAxesCombined size={19} strokeWidth={1.7} aria-hidden="true" /></div><span>{label}</span><strong>{value ?? "—"}</strong><small>{note}</small></article>;
 }
 
 function BookRating({ rating = 0, count = 0 }) {
@@ -54,19 +57,10 @@ function PageTitle({ eyebrow, title, note, action }) {
 }
 
 function NavIcon({ name }) {
-  const paths = {
-    overview: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
-    books: <><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v17H6.5A2.5 2.5 0 0 0 4 22z" /><path d="M4 5.5v14A2.5 2.5 0 0 1 6.5 17H20M8 7h8" /></>,
-    add_book: <><path d="M5 4h11a2 2 0 0 1 2 2v7" /><path d="M5 4v16h7M8 8h6M16 16h6M19 13v6" /></>,
-    bookings: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 10h18M8 2v4M16 2v4M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01" /></>,
-    requests: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m4 7 8 6 8-6" /></>,
-    students: <><path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="10" cy="7" r="4" /><path d="M20 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></>,
-    loans: <><path d="M7 7h13l-3-3M20 7l-3 3M17 17H4l3 3M4 17l3-3" /></>,
-    fines: <><circle cx="12" cy="12" r="9" /><path d="M15 8.5a3.5 3.5 0 0 0-2.7-1.1c-1.5 0-2.5.8-2.5 1.9 0 3 5.7 1.3 5.7 4.6 0 1.3-1.1 2.3-2.9 2.3a4.2 4.2 0 0 1-3.2-1.3M12 5.5v13" /></>,
-    reviews: <><path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z" /></>,
-    account: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-1.8 3.1-.2-.1a1.7 1.7 0 0 0-1.8.4l-.1.1h-3.6l-.1-.2a1.7 1.7 0 0 0-1.6-1.1 1.7 1.7 0 0 0-1.2.5l-.1.1-3.1-1.8.1-.2A1.7 1.7 0 0 0 6 16l-.1-.1v-3.6l.2-.1a1.7 1.7 0 0 0 .6-2.8l-.1-.1 1.8-3.1.2.1a1.7 1.7 0 0 0 2.8-1.4V4.8H15v.2a1.7 1.7 0 0 0 2.8 1.2l.1-.1L21 7.9l-.1.2a1.7 1.7 0 0 0 .4 1.8l.1.1v3.6l-.2.1a1.7 1.7 0 0 0-1.8 1.3z" /></>,
-  };
-  return <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name] || paths.books}</svg>;
+  const icons = { overview: LayoutDashboard, books: LibraryBig, add_book: Plus, bookings: CalendarDays,
+    requests: ClipboardList, students: Users, loans: Repeat2, fines: Receipt, reviews: Star, account: CircleUserRound };
+  const Icon = icons[name] || BookOpen;
+  return <Icon className="nav-icon" size={20} strokeWidth={1.7} aria-hidden="true" />;
 }
 
 function BookCover({ book, compact = false }) {
@@ -103,8 +97,8 @@ function AuthScreen({ onLogin, onSetup, onSignup, setupAvailable }) {
   return (
     <main className="auth-page">
       <section className="auth-card">
-        <div className="auth-brand"><img src="/assets/campusshelf-emblem.png" alt="" /><div><b>CampusShelf</b><small>THE KNOWLEDGE CLUB</small></div></div>
-        <span className="eyebrow">A CALMER KIND OF LIBRARY</span>
+        <div className="auth-brand"><img src="/assets/campusshelf-emblem.png" alt="" /><div><b>CampusShelf</b><small>READ. CONNECT. DISCOVER.</small></div></div>
+        <span className="eyebrow">YOUR NEXT CHAPTER STARTS HERE</span>
         <h1>{mode === "signup" ? "Create student account" : mode === "setup" ? "Set up the library desk" : "Welcome back"}</h1>
         <p className="muted">{mode === "signup" ? "Enter your campus details to create your library account immediately." : mode === "setup" ? "Create the first librarian account to get started." : "Sign in using your student ID, librarian ID, or email."}</p>
         {error && <div className="notice error">{error}</div>}
@@ -138,7 +132,7 @@ function AuthScreen({ onLogin, onSetup, onSignup, setupAvailable }) {
         </div>
         <div className="auth-note"><span>✓</span> Copy QR codes only identify a book. Your account is always needed to borrow.</div>
       </section>
-      <aside className="auth-art"><div className="auth-art-mark" aria-hidden="true">C<span>S</span></div><div><span className="eyebrow">A PLACE FOR THE NEXT CHAPTER</span><h2>Good books travel. Ideas stay with you.</h2><p>Your campus collection, ready when you are.</p></div></aside>
+      <aside className="auth-art"><div className="art-caption"><span className="edition-number">01 / THE CAMPUS COLLECTION</span><Sparkles size={20} aria-hidden="true" /></div><LibraryArt /><div><span className="eyebrow">A PLACE FOR THE NEXT CHAPTER</span><h2>A little curiosity. A whole new chapter.</h2><p>Your campus collection, ready when you are.</p></div></aside>
     </main>
   );
 }
@@ -997,8 +991,8 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
                     <span className="pill">{space.space_type_display}</span>
                   </div>
                   <div className="space-meta">
-                    <span>📍 {space.location || "Library"}</span>
-                    <span>👥 Up to {space.capacity} {space.capacity === 1 ? "student" : "students"}</span>
+                    <span><MapPin size={14} aria-hidden="true" /> {space.location || "Library"}</span>
+                    <span><Users size={14} aria-hidden="true" /> Up to {space.capacity} {space.capacity === 1 ? "student" : "students"}</span>
                   </div>
                   {space.description && <p className="space-desc">{space.description}</p>}
                   {space.amenities && (
@@ -1020,7 +1014,9 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
                     </div>
                     <div className="slot-grid">
                       {(space.schedule || []).map((slot, idx) => (
-                        <div
+                        <button
+                          type="button"
+                          disabled={slot.status !== "empty"}
                           key={idx}
                           className={`slot-pill ${slot.status}`}
                           title={`${slot.start}-${slot.end}: ${slot.status === "empty" ? "Empty / Click to book" : slot.status === "pending" ? "Pending approval" : "Occupied"}`}
@@ -1030,7 +1026,7 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
                         >
                           <span>{slot.start}</span>
                           <small>{slot.status === "empty" ? "Empty" : slot.status === "pending" ? "Pending" : "Booked"}</small>
-                        </div>
+                        </button>
                       ))}
                     </div>
                   </div>
@@ -1078,15 +1074,15 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
               <article className="booking-row-card" key={b.id}>
                 <div className="booking-card-main">
                   <div className={`booking-card-icon ${b.space_type || "pod"}`}>
-                    {b.space_type === "room" ? "🏛️" : b.space_type === "pod" ? "🎧" : "📖"}
+                    <BookOpen size={22} strokeWidth={1.7} aria-hidden="true" />
                   </div>
                   <div className="booking-card-details">
                     <b>{b.space_name}</b>
                     <div className="time-line">
-                      📅 {b.booking_date} · ⏰ {b.start_time} - {b.end_time}
+                      <CalendarDays size={14} aria-hidden="true" /> {b.booking_date} · {b.start_time} - {b.end_time}
                     </div>
                     <div className="sub-line">
-                      <span>👥 {b.attendees_count} {b.attendees_count === 1 ? "student" : "students"}</span>
+                      <span><Users size={14} aria-hidden="true" /> {b.attendees_count} {b.attendees_count === 1 ? "student" : "students"}</span>
                       <span>Requested {new Date(b.created_at).toLocaleDateString()}</span>
                     </div>
                     {b.purpose && <p className="purpose-note">“{b.purpose}”</p>}
@@ -1131,16 +1127,16 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
 
       {bookingModal && (
         <div className="booking-modal-overlay" onClick={() => !submitting && setBookingModal(null)}>
-          <div className="booking-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="booking-modal" role="dialog" aria-modal="true" aria-label="Space booking" onClick={(e) => e.stopPropagation()}>
             <div className="booking-modal-header">
               <div>
                 <span className="eyebrow">{bookingModal.space_type_display}</span>
                 <h3>Book {bookingModal.name}</h3>
-                <p>📍 {bookingModal.location} · Max capacity: {bookingModal.capacity} students</p>
+                <p><MapPin size={14} aria-hidden="true" /> {bookingModal.location} · Max capacity: {bookingModal.capacity} students</p>
               </div>
               <button
                 type="button"
-                className="modal-close-btn"
+                className="modal-close-btn" aria-label="Close dialog"
                 disabled={submitting}
                 onClick={() => setBookingModal(null)}
               >
@@ -1407,17 +1403,17 @@ function LibrarianSpaceBookingsPage({ setNotice }) {
               <article className="booking-row-card" key={b.id}>
                 <div className="booking-card-main">
                   <div className={`booking-card-icon ${b.space_type || "pod"}`}>
-                    {b.space_type === "room" ? "🏛️" : b.space_type === "pod" ? "🎧" : "📖"}
+                    <BookOpen size={22} strokeWidth={1.7} aria-hidden="true" />
                   </div>
                   <div className="booking-card-details">
                     <b>{b.space_name}</b>
                     <div className="time-line">
-                      📅 {b.booking_date} · ⏰ {b.start_time} - {b.end_time}
+                      <CalendarDays size={14} aria-hidden="true" /> {b.booking_date} · {b.start_time} - {b.end_time}
                     </div>
                     <div className="sub-line">
                       <span>👤 <strong>{b.student_name}</strong> ({b.student_id})</span>
                       <span>📧 {b.student_email}</span>
-                      <span>👥 {b.attendees_count} student(s)</span>
+                      <span><Users size={14} aria-hidden="true" /> {b.attendees_count} student(s)</span>
                       <span>Requested {new Date(b.created_at).toLocaleDateString()}</span>
                     </div>
                     {b.purpose && <p className="purpose-note">Purpose: “{b.purpose}”</p>}
@@ -1495,8 +1491,8 @@ function LibrarianSpaceBookingsPage({ setNotice }) {
                     <span className="pill">{sp.space_type_display}</span>
                   </div>
                   <div className="space-meta">
-                    <span>📍 {sp.location}</span>
-                    <span>👥 Up to {sp.capacity} students</span>
+                    <span><MapPin size={14} aria-hidden="true" /> {sp.location}</span>
+                    <span><Users size={14} aria-hidden="true" /> Up to {sp.capacity} students</span>
                   </div>
                   <div className="schedule-section">
                     <div className="schedule-header">
@@ -1532,7 +1528,7 @@ function LibrarianSpaceBookingsPage({ setNotice }) {
 
       {rejectingBooking && (
         <div className="booking-modal-overlay" onClick={() => setRejectingBooking(null)}>
-          <div className="booking-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="booking-modal" role="dialog" aria-modal="true" aria-label="Space booking" onClick={(e) => e.stopPropagation()}>
             <div className="booking-modal-header">
               <div>
                 <span className="eyebrow">DECLINE REQUEST</span>
@@ -1541,7 +1537,7 @@ function LibrarianSpaceBookingsPage({ setNotice }) {
               </div>
               <button
                 type="button"
-                className="modal-close-btn"
+                className="modal-close-btn" aria-label="Close dialog"
                 onClick={() => setRejectingBooking(null)}
               >
                 ×
@@ -1699,9 +1695,9 @@ function StudentPortal({ user, tab, setTab, setNotice, selectedBook, onOpenBook,
   if (tab === "space_bookings") return <StudentSpaceBookingsPage user={user} setNotice={setNotice} />;
 
   if (tab === "catalogue") return <>
-    <section className="student-welcome"><div><span className="eyebrow">YOUR CAMPUS LIBRARY</span><h2>Hello, {user.name.split(" ")[0]}.</h2><p>Find a title that interests you, then check out the exact copy from its QR label.</p></div><div className="welcome-mark" aria-hidden="true"><span>YOUR NEXT</span><b>read</b><span>STARTS HERE</span></div></section>
+    <section className="student-welcome"><div><span className="eyebrow">YOUR CAMPUS LIBRARY</span><h2>Hello, {user.name.split(" ")[0]}.</h2><p>Find a title that interests you, then check out the exact copy from its QR label.</p></div><LibraryArt className="welcome-illustration" /></section>
     {slip && <IssueSlip loan={slip} onClose={() => setSlip(null)} />}
-    <section className="panel"><div className="panel-head"><div><span className="eyebrow">COLLECTION</span><h3>Search the shelves</h3></div></div><form className="search-row" onSubmit={search}><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search books or authors" /><button className="button light" disabled={loading}>{loading ? "Loading…" : "Search"}</button></form>
+    <section className="panel"><div className="panel-head"><div><span className="eyebrow">COLLECTION</span><h3>Search the shelves</h3></div></div><form className="search-row" onSubmit={search}><input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search books or authors" placeholder="Search books or authors" /><button className="button light" disabled={loading}>{loading ? "Loading…" : "Search"}</button></form>
       <div className="catalogue-filters"><label>Category<select value={category} onChange={(event) => { const value = event.target.value; setCategory(value); load(query, 1, value, availability).catch((error) => noticeText(setNotice, error.message, "error")); }}><option value="">All categories</option>{categories.map((item) => <option key={item} value={item}>{item}</option>)}</select></label><label>Availability<select value={availability} onChange={(event) => { const value = event.target.value; setAvailability(value); load(query, 1, category, value).catch((error) => noticeText(setNotice, error.message, "error")); }}><option value="all">Any status</option><option value="available">Available now</option><option value="unavailable">Join the hold queue</option></select></label></div>
       <p className="route-hint">{pagination.total} titles in this view</p>
       <div className="catalogue-grid book-catalogue-grid">{books.map((book) => <button type="button" className="catalogue-card book-tile" key={book.id} onClick={() => onOpenBook(book)}><BookCover book={book} /><span className="eyebrow">{book.category}</span><h3>{book.title}</h3><p>{book.author}</p><BookRating rating={book.average_rating} count={book.rating_count} /><div className="catalogue-footer"><span>{book.available_to_borrow} copies available</span><small>Shelf {book.shelf || "Unassigned"}</small></div><span className="book-tile-link">View title <span aria-hidden="true">↗</span></span></button>)}{loading && <p className="empty">Loading books…</p>}{!loading && books.length === 0 && <p className="empty">No books match that search.</p>}</div>
@@ -1742,6 +1738,8 @@ function StudentPortal({ user, tab, setTab, setNotice, selectedBook, onOpenBook,
 
 export default function App() {
   const [user, setUser] = useState(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const reducedMotion = useReducedMotion();
   const [setupAvailable, setSetupAvailable] = useState(false);
   const [tab, setTab] = useState("overview");
   const [selectedBook, setSelectedBook] = useState(null);
@@ -1760,8 +1758,19 @@ export default function App() {
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    if (!menuOpen) return;
+    const closeOnEscape = (event) => { if (event.key === "Escape") setMenuOpen(false); };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", closeOnEscape);
+    return () => { document.body.style.overflow = previousOverflow; document.removeEventListener("keydown", closeOnEscape); };
+  }, [menuOpen]);
+
   async function signIn(values) {
     const result = await api("/auth/login/", { method: "POST", body: formBody(values) });
+    window.scrollTo({ top: 0 });
+    setNotice(null);
     setUser(result.user);
     setTab(result.user.role === "student" ? "catalogue" : "overview");
   }
@@ -1823,17 +1832,20 @@ export default function App() {
   else if (tab === "fines") content = <FinesPage setNotice={setNotice} />;
   else content = <ReviewsPage setNotice={setNotice} />;
 
-  return <div className={`app-shell ${isStudent ? "student-shell" : ""}`}>
-    <aside className="sidebar">
+  return <div className={`app-shell ${isStudent ? "student-shell" : ""} ${menuOpen ? "menu-open" : ""}`}>
+    <a className="skip-link" href="#portal-content">Skip to content</a>
+    {menuOpen && <button className="nav-backdrop" aria-label="Close navigation" onClick={() => setMenuOpen(false)} />}
+    <aside className="sidebar" id="portal-navigation">
+      <button className="drawer-close" type="button" aria-label="Close navigation" onClick={() => setMenuOpen(false)}><X size={20} /></button>
       <div className="sidebar-brand"><img src="/assets/campusshelf-emblem.png" alt="" /><div><b>CampusShelf</b><small>{isStudent ? "STUDENT PORTAL" : "LIBRARIAN DESK"}</small></div></div>
       <div className="sidebar-label">{isStudent ? "YOUR LIBRARY" : "WORKSPACE"}</div>
-      <nav aria-label={isStudent ? "Student portal" : "Librarian workspace"}>{tabs.map(([key, label, icon]) => <button className={activeTab === key ? "active" : ""} key={key} onClick={() => setTab(key)}><NavIcon name={icon} />{label}</button>)}</nav>
+      <nav aria-label={isStudent ? "Student portal" : "Librarian workspace"}>{tabs.map(([key, label, icon]) => <button className={activeTab === key ? "active" : ""} key={key} aria-current={activeTab === key ? "page" : undefined} onClick={() => { setTab(key); setMenuOpen(false); window.scrollTo({ top: 0 }); }}><NavIcon name={icon} /><span>{label}</span>{activeTab === key && <span className="nav-active-dot" />}</button>)}</nav>
       {!isStudent && <div className="sidebar-help"><span className="eyebrow">QUICK NOTE</span><p>Scan the label on the physical copy, not the book cover.</p><a href="/admin/">Open Django Admin ↗</a></div>}
       <div className="sidebar-user"><div className="avatar">{user.name.slice(0, 1).toUpperCase()}</div><div><b>{user.name}</b><small>{isStudent ? user.student_id : user.login_id}</small></div></div>
     </aside>
-    <main className="main-area"><header className="topbar"><div><span className="eyebrow">{isStudent ? "STUDENT PORTAL" : "LIBRARIAN WORKSPACE"}</span><h1>{active[1]}</h1></div><div className="topbar-right"><span className="portal-chip">{isStudent ? "Reader account" : "Library staff"}</span><span className="top-date">CampusShelf</span><button className="signout-button" type="button" onClick={signOut}>Sign out</button></div></header>
-      {notice && <div className={`notice ${notice.kind}`} role="status">{notice.text}<button onClick={() => setNotice(null)}>×</button></div>}
-      <div className="page-content">{content}</div>
+    <main className="main-area"><header className="topbar"><button className="menu-toggle" type="button" aria-label={menuOpen ? "Close navigation" : "Open navigation"} aria-expanded={menuOpen} aria-controls="portal-navigation" onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X size={21} /> : <Menu size={21} />}</button><div><span className="eyebrow">{isStudent ? "STUDENT PORTAL" : "LIBRARIAN WORKSPACE"}</span><h1>{active[1]}</h1></div><div className="topbar-right"><span className="portal-chip">{isStudent ? "Reader account" : "Library staff"}</span><span className="top-date">{new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</span><button className="signout-button" type="button" onClick={signOut}>Sign out</button></div></header>
+      {notice && <div className={`notice ${notice.kind}`} role="status">{notice.text}<button aria-label="Dismiss notification" onClick={() => setNotice(null)}>×</button></div>}
+      <LazyMotion features={domAnimation}><AnimatePresence mode="wait" initial={false}><m.div id="portal-content" tabIndex={-1} className="page-content" key={tab + (selectedBook?.id || "")} initial={reducedMotion ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: reducedMotion ? 0 : -6 }} transition={{ duration: reducedMotion ? 0 : .2 }}>{content}</m.div></AnimatePresence></LazyMotion>
     </main>
     <Chatbot user={user} />
   </div>;
