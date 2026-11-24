@@ -32,6 +32,7 @@ const librarianTabs = [
 
 const studentTabs = [
   ["catalogue", "Discover", "books"],
+  ["scan_copy", "Scan your copy", "loans"],
   ["space_bookings", "Room & Pods", "bookings"],
   ["my_loans", "My loans", "loans"],
   ["my_history", "History", "loans"],
@@ -1841,8 +1842,12 @@ function StudentPortal({ user, tab, setTab, setNotice, selectedBook, onOpenBook,
 
   if (tab === "catalogue") return <>
     <section className="student-welcome"><div><span className="eyebrow">YOUR CAMPUS LIBRARY</span><h2>Hello, {user.name.split(" ")[0]}.</h2><p>Find a title that interests you, then check out the exact copy from its QR label.</p></div><LibraryArt className="welcome-illustration" /></section>
-    {slip && <IssueSlip loan={slip} onClose={() => setSlip(null)} />}
     <CatalogueExplorer path="/catalogue/" renderBook={(book) => <CatalogueTile key={book.id} book={book} onOpen={onOpenBook} />} />
+  </>;
+
+  if (tab === "scan_copy") return <>
+    <PageTitle eyebrow="STUDENT PORTAL / READY TO BORROW" title="Scan your copy" note="Scan the QR label on your chosen physical copy, then confirm checkout." action={<button className="button light" onClick={onBackToBooks}>← Browse books</button>} />
+    {slip && <IssueSlip loan={slip} onClose={() => setSlip(null)} />}
     <section className="panel scan-student"><div><span className="eyebrow">READY TO BORROW</span><h3>Scan your copy</h3><p>Sign in first, scan the QR label, and confirm the issue. You can borrow up to five books.</p><button className="button primary" disabled={busy} onClick={() => setScanOpen((open) => !open)}>{scanOpen ? "Close camera" : "Open QR scanner"}</button></div><div className="scan-side">{copyInfo ? <><b>{copyInfo.book_title}</b><span>{copyInfo.copy_id}</span><span className={`status ${copyInfo.status}`}>{copyInfo.status}</span>{copyInfo.status === "available" && <button className="button dark" disabled={busy} onClick={issueCopy}>{busy ? "Checking out…" : "Confirm checkout"}</button>}</> : <span className="scan-symbol">⌗</span>}</div></section>
     <Scanner open={scanOpen} onScan={scanned} onError={(message) => noticeText(setNotice, message, "error")} />
   </>;
@@ -1850,7 +1855,7 @@ function StudentPortal({ user, tab, setTab, setNotice, selectedBook, onOpenBook,
   if (tab === "student_book") return <>
     <PageTitle eyebrow="STUDENT CATALOGUE / TITLE DETAILS" title={selectedBook.title} note={`${selectedBook.author} · ${selectedBook.category}`} action={<button className="button light" onClick={onBackToBooks}>← Back to books</button>} />
     <section className="book-detail-hero"><div className="detail-cover-wrap"><BookCover book={selectedBook} /></div><div><span className="eyebrow">{selectedBook.category}</span><h3>{selectedBook.title}</h3><p>{selectedBook.description || "Find this title on the library shelves."}</p><BookRating rating={selectedBook.average_rating} count={selectedBook.rating_count} /><div className="detail-stats"><span><b>{selectedBook.available_to_borrow}</b> copies free to borrow</span><span><b>{selectedBook.total}</b> copies in the library</span><span>Shelf <b>{selectedBook.shelf || "Unassigned"}</b></span></div></div></section>
-    <section className="panel detail-next-step"><span className="eyebrow">{selectedBook.available_to_borrow > 0 ? "READY TO BORROW" : "RESERVATION QUEUE"}</span><h3>{selectedBook.available_to_borrow > 0 ? "Scan the QR on your chosen copy" : "Get in line for the next copy"}</h3><p>{selectedBook.available_to_borrow > 0 ? "Go back to the catalogue to open the scanner. The librarian scans the same copy QR when you return it." : "We’ll mark your hold ready as soon as a copy is available."}</p>{selectedBook.available_to_borrow > 0 ? <button className="button primary" onClick={onBackToBooks}>Back to catalogue and scanner</button> : <button className="button primary" disabled={busy} onClick={() => reserveBook(selectedBook.id)}>{busy ? "Adding hold…" : "Reserve this book"}</button>}</section>
+    <section className="panel detail-next-step"><span className="eyebrow">{selectedBook.available_to_borrow > 0 ? "READY TO BORROW" : "RESERVATION QUEUE"}</span><h3>{selectedBook.available_to_borrow > 0 ? "Scan the QR on your chosen copy" : "Get in line for the next copy"}</h3><p>{selectedBook.available_to_borrow > 0 ? "Open the scanner to check out your chosen copy. The librarian scans the same copy QR when you return it." : "We’ll mark your hold ready as soon as a copy is available."}</p>{selectedBook.available_to_borrow > 0 ? <button className="button primary" onClick={() => { setTab("scan_copy"); window.scrollTo({ top: 0 }); }}>Go to scanner</button> : <button className="button primary" disabled={busy} onClick={() => reserveBook(selectedBook.id)}>{busy ? "Adding hold…" : "Reserve this book"}</button>}</section>
     <StudentBookReviews key={selectedBook.id} book={selectedBook} setNotice={setNotice} onRatingChange={onBookRatingChange} />
   </>;
 
