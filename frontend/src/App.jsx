@@ -5,6 +5,7 @@ import Scanner from "./Scanner.jsx";
 import Chatbot from "./Chatbot.jsx";
 import LibraryArt from "./LibraryArt.jsx";
 import Preloader from "./Preloader.jsx";
+import CopyLabels from "./CopyLabels.jsx";
 import { AnimatePresence, LazyMotion, domAnimation, m, useReducedMotion } from "motion/react";
 import { BookOpen, CalendarDays, ChartNoAxesCombined, CircleUserRound, ClipboardList, LayoutDashboard, LibraryBig, MapPin, Menu, Plus, Receipt, Repeat2, Sparkles, Star, Users, X } from "lucide-react";
 
@@ -202,7 +203,7 @@ function BooksPage({ setNotice, onAddBook, onOpenBook }) {
   return <>
     <PageTitle eyebrow="COLLECTION / SEARCH" title="Find a title" note="Search the shelves, then open a title to see every copy and its status." action={<button className="button primary" onClick={onAddBook}>＋ Add a book</button>} />
     <section className="panel search-panel">
-      <div className="panel-head"><div><span className="eyebrow">LIBRARY CATALOGUE</span><h3>Search books and authors</h3></div><button className="button light small" type="button" onClick={showAllCopies}>Print all QR labels</button></div>
+      <div className="panel-head"><div><span className="eyebrow">LIBRARY CATALOGUE</span><h3>Search books and authors</h3></div><button className="button light small" type="button" onClick={showAllCopies}>Choose QR labels to print</button></div>
       <form className="search-row" onSubmit={(event) => { event.preventDefault(); loadBooks(search, 1).catch((error) => noticeText(setNotice, error.message, "error")); }}><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Type a title or author" /><button className="button light" disabled={loading}>{loading ? "Loading…" : "Search"}</button></form>
       <div className="catalogue-filters"><label>Category<select value={category} onChange={(event) => { const value = event.target.value; setCategory(value); loadBooks(search, 1, value, availability).catch((error) => noticeText(setNotice, error.message, "error")); }}><option value="">All categories</option>{categories.map((item) => <option key={item} value={item}>{item}</option>)}</select></label><label>Availability<select value={availability} onChange={(event) => { const value = event.target.value; setAvailability(value); loadBooks(search, 1, category, value).catch((error) => noticeText(setNotice, error.message, "error")); }}><option value="all">Any status</option><option value="available">Available to borrow</option><option value="unavailable">Unavailable</option></select></label></div>
       <p className="route-hint">{loading ? "Loading the collection…" : `${pagination.total} title${pagination.total === 1 ? "" : "s"} · Select a book to edit details or open its copy labels.`}</p>
@@ -214,7 +215,7 @@ function BooksPage({ setNotice, onAddBook, onOpenBook }) {
       </button>)}{loading && <p className="empty">Loading titles…</p>}{!loading && books.length === 0 && <p className="empty">No titles found. Try another search or add a new book.</p>}</div>
       <div className="pagination-controls"><span>Page {pagination.page} of {pagination.pages}</span><div><button className="button light small" disabled={loading || pagination.page <= 1} onClick={() => loadBooks(search, pagination.page - 1).catch((error) => noticeText(setNotice, error.message, "error"))}>← Previous</button><button className="button light small" disabled={loading || pagination.page >= pagination.pages} onClick={() => loadBooks(search, pagination.page + 1).catch((error) => noticeText(setNotice, error.message, "error"))}>Next →</button></div></div>
     </section>
-    {copies && <section className="panel qr-panel"><div className="panel-head"><div><span className="eyebrow">PRINTABLE LABELS</span><h3>{copies.title}</h3></div><button className="button light" onClick={() => window.print()}>Print labels</button></div><div className="qr-grid">{copies.results.map((copy) => <article className="qr-card" key={copy.id}><QRCodeSVG value={copy.copy_id} size={120} />{copies.title === "All book copies" && <span>{copy.book_title}</span>}<b>{copy.copy_id}</b><span>{copy.status === "available" ? "Free" : "Allotted"} · {copy.shelf}</span></article>)}</div>{copies.results.length === 0 && <p className="empty">There are no physical copies to label yet.</p>}</section>}
+    {copies && <CopyLabels copies={copies.results} title={copies.title} />}
   </>;
 }
 
@@ -274,10 +275,7 @@ function BookDetailPage({ book, setNotice, onBack, onEdit }) {
   return <>
     <PageTitle eyebrow="BOOK DETAILS / PHYSICAL COPIES" title={book.title} note={`${book.author} · ${book.category}`} action={<div className="page-title-actions"><button className="button light" onClick={onBack}>← Back to titles</button><button className="button primary" onClick={() => onEdit(book)}>Edit details</button></div>} />
     <section className="book-detail-hero"><div className="detail-cover-wrap"><BookCover book={book} /></div><div><span className="eyebrow">{book.category}</span><h3>{book.title}</h3><p>{book.description || "A title in the CampusShelf collection."}</p><div className="detail-stats"><span><b>{book.total}</b> physical copies</span><span><b>{availableCount}</b> free to borrow</span><span><b>{copies.length - availableCount}</b> on loan</span><span><b>{shelfLocations.length > 1 ? "Shelves" : "Shelf"} {shelfLabel}</b></span></div></div></section>
-    <section className="panel"><div className="panel-head"><div><span className="eyebrow">COPY BY COPY</span><h3>QR labels and availability</h3></div><button className="button light" disabled={loading || copies.length === 0} onClick={() => window.print()}>Print these labels</button></div>
-      <div className="qr-grid copy-status-grid">{copies.map((copy) => <article className="qr-card copy-status-card" key={copy.id}><QRCodeSVG value={copy.copy_id} size={116} /><span className={`status ${copy.status}`}>{copy.status === "available" ? "Free to borrow" : "Allotted"}</span><b>{copy.copy_id}</b><span>Shelf {copy.shelf || "Unassigned"}</span>{copy.borrowed_to && <span>With {copy.borrowed_to}</span>}{copy.due_at && <span>Due {new Date(copy.due_at).toLocaleDateString()}</span>}{copy.issue_code && <small>Issue {copy.issue_code}</small>}</article>)}</div>
-      {loading && <p className="empty">Loading copy labels…</p>}{!loading && copies.length === 0 && <p className="empty">This title has no physical copies yet.</p>}
-    </section>
+    <CopyLabels copies={copies} title={book.title} loading={loading} />
   </>;
 }
 

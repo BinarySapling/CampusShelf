@@ -477,3 +477,11 @@ button.slot-pill.empty:hover { box-shadow: 0 3px 8px #244f4d15; }
 @media (max-width: 760px) { :root select, :root select option { font-size: 16px; } }
 @media (prefers-reduced-motion: reduce) { :root select, :root select::picker-icon { transition: none; } }
 @media (forced-colors: active) { :root select { appearance: auto; background-image: none; } }
+.label-print-toolbar { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:18px; margin-bottom:18px; }
+.label-selection-actions { display:flex; align-items:center; flex-wrap:wrap; gap:16px; }
+.label-selection-actions > span { color:var(--muted); font-size:12px; }
+.label-checkbox { display:flex; gap:8px; align-items:center; width:100%; cursor:pointer; }
+.label-checkbox input { width:18px; height:18px; accent-color:var(--green); flex-shrink:0; }
+.label-checkbox span { font-size:11px; overflow-wrap:anywhere; text-align:left; }
+.qr-card.label-selected { border-style:solid; border-color:#648a79; background:#f0f6ed; box-shadow:0 0 0 2px #648a7915; }
+@media(max-width:760px) { .label-print-toolbar .button-line { width:100%; } .label-print-toolbar .button { flex:1; } }
