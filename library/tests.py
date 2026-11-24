@@ -1244,6 +1244,37 @@ class CampusShelfFeatureApiTests(TestCase):
         self.assertEqual(librarian_login.status_code, 200)
         self.assertEqual(librarian_login.json()["user"]["role"], "librarian")
 
+    def test_pod_booking_enforces_two_hour_limit_and_keeps_room_duration(self):
+        member, student = self.make_student("PODLIMIT")
+        pod = LibrarySpace.objects.create(name="Limited Pod", space_type=LibrarySpace.POD, capacity=2)
+        room = LibrarySpace.objects.create(name="Long Meeting Room", space_type=LibrarySpace.ROOM, capacity=4)
+        values = {"space_id": str(pod.pk), "booking_date": (timezone.localdate() + timedelta(days=1)).isoformat(),
+                  "start_time": "10:00", "end_time": "12:01", "attendees_count": 1}
+        for end in ["12:01", "13:00", "99:00", "09:00"]:
+            rejected = student.post("/api/spaces/book/", {**values, "end_time": end})
+            self.assertEqual(rejected.status_code, 400)
+        self.assertEqual(SpaceBooking.objects.filter(space=pod).count(), 0)
+        accepted = student.post("/api/spaces/book/", {**values, "end_time": "12:00"})
+        self.assertEqual(accepted.status_code, 201)
+        approved = self.staff_client.post(f"/api/librarian/space-bookings/{accepted.json()['booking']['id']}/approve/")
+        self.assertEqual(approved.status_code, 200)
+        late = student.post("/api/spaces/book/", {**values, "start_time": "19:00", "end_time": "20:00"})
+        self.assertEqual(late.status_code, 201)
+        room_booking = student.post("/api/spaces/book/", {**values, "space_id": str(room.pk), "end_time": "13:00"})
+        self.assertEqual(room_booking.status_code, 201)
+
+    def test_librarian_cannot_approve_legacy_overlong_pod_booking(self):
+        member, _ = self.make_student("LEGACYPOD")
+        pod = LibrarySpace.objects.create(name="Legacy Pod", space_type=LibrarySpace.POD, capacity=2)
+        booking = SpaceBooking.objects.create(space=pod, member=member, space_name=pod.name,
+            space_type=LibrarySpace.ROOM, student_name=member.name, student_id=member.student_id,
+            booking_date=(timezone.localdate() + timedelta(days=1)).isoformat(), start_time="09:00", end_time="12:00")
+        response = self.staff_client.post(f"/api/librarian/space-bookings/{booking.pk}/approve/")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("2 hours", response.json()["error"])
+        booking.refresh_from_db()
+        self.assertEqual(booking.status, SpaceBooking.PENDING)
+
     def test_space_booking_and_librarian_approval_flow(self):
         tomorrow = (timezone.localdate() + timedelta(days=1)).isoformat()
         member, student_client = self.make_student("SPACE")

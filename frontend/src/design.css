@@ -564,3 +564,4 @@ button.slot-pill.empty:hover { box-shadow: 0 3px 8px #244f4d15; }
   .record-filters { padding:14px; }
   .transaction-filters { grid-template-columns:1fr; }
 }
+.pod-booking-limit { padding:12px 14px; margin:0; border:1px solid #dce7d6; border-radius:10px; background:#f0f6eb; color:#3e6546; font-size:12px; line-height:1.6; }

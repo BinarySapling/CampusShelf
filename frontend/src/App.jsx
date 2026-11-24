@@ -7,6 +7,7 @@ import LibraryArt from "./LibraryArt.jsx";
 import Preloader from "./Preloader.jsx";
 import CopyLabels from "./CopyLabels.jsx";
 import SearchPicker from "./SearchPicker.jsx";
+import { bookingEndTimes, bookingMinutes } from "./bookingTime.js";
 import CatalogueExplorer from "./CatalogueExplorer.jsx";
 import { ActiveFilters, CheckboxGroup, RecordFilters, filterRows } from "./Filters.jsx";
 import { AnimatePresence, LazyMotion, domAnimation, m, useReducedMotion } from "motion/react";
@@ -815,7 +816,7 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
       firstEmpty = space.schedule.find((s) => s.status === "empty");
     }
     const startTime = firstEmpty ? firstEmpty.start : "09:00";
-    const validEnds = TIME_SLOTS.filter((t) => t > startTime);
+    const validEnds = bookingEndTimes(TIME_SLOTS, startTime, space.space_type);
     const endTime = firstEmpty ? firstEmpty.end : (validEnds[0] || "10:00");
     setBookingModal(space);
     setBookingForm({
@@ -829,7 +830,7 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
 
   function handleStartTimeChange(newStartTime) {
     setModalError("");
-    const validEnds = TIME_SLOTS.filter((t) => t > newStartTime);
+    const validEnds = bookingEndTimes(TIME_SLOTS, newStartTime, bookingModal?.space_type);
     let nextEndTime = bookingForm.end_time;
     if (!validEnds.includes(nextEndTime)) {
       nextEndTime = validEnds[0] || "";
@@ -858,6 +859,11 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
 
     if (bookingForm.start_time >= bookingForm.end_time) {
       setModalError("End time must be after start time.");
+      return;
+    }
+
+    if (bookingModal.space_type === "pod" && bookingMinutes(bookingForm.end_time) - bookingMinutes(bookingForm.start_time) > 120) {
+      setModalError("Study pod bookings cannot exceed 2 hours per booking.");
       return;
     }
 
@@ -1162,6 +1168,7 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
                 />
               </label>
 
+              {bookingModal.space_type === "pod" && <p className="pod-booking-limit">Study pods can be booked for up to 2 hours per booking.</p>}
               <div className="two-fields">
                 <label>
                   Start Time
@@ -1183,7 +1190,7 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
                       setBookingForm({ ...bookingForm, end_time: e.target.value });
                     }}
                   >
-                    {TIME_SLOTS.filter((t) => t > bookingForm.start_time).map((t) => (
+                    {bookingEndTimes(TIME_SLOTS, bookingForm.start_time, bookingModal.space_type).map((t) => (
                       <option key={t} value={t}>{t}</option>
                     ))}
                   </select>

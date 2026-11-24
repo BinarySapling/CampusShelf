@@ -1654,6 +1654,23 @@ def spaces_list(request):
     })
 
 
+def space_booking_time_error(space, start_time, end_time):
+    try:
+        start = datetime.strptime(start_time, "%H:%M")
+        end = datetime.strptime(end_time, "%H:%M")
+    except ValueError:
+        return "Use valid booking times in HH:MM format."
+    if start.strftime("%H:%M") != start_time or end.strftime("%H:%M") != end_time:
+        return "Use valid booking times in HH:MM format."
+    if end <= start:
+        return "End time must be after start time."
+    if start_time < "08:00" or end_time > "20:00":
+        return "Bookings must be within library hours, 08:00–20:00."
+    if space.space_type == LibrarySpace.POD and end - start > timedelta(hours=2):
+        return "Study pod bookings cannot exceed 2 hours per booking."
+    return ""
+
+
 @student_api
 @require_POST
 def create_space_booking(request):
@@ -1678,8 +1695,9 @@ def create_space_booking(request):
 
     start_time = data["start_time"].strip()
     end_time = data["end_time"].strip()
-    if start_time >= end_time:
-        return JsonResponse({"error": "End time must be after start time."}, status=400)
+    time_error = space_booking_time_error(space, start_time, end_time)
+    if time_error:
+        return JsonResponse({"error": time_error}, status=400)
 
     attendees_count = data["attendees_count"]
     if attendees_count > space.capacity:
@@ -1788,6 +1806,9 @@ def review_space_booking(request, booking_id, action):
         return JsonResponse({"error": f"This booking is already {booking.status}."}, status=400)
 
     if action == "approve":
+        time_error = space_booking_time_error(booking.space, booking.start_time, booking.end_time)
+        if time_error:
+            return JsonResponse({"error": time_error}, status=400)
         # Check for another confirmed booking that overlaps
         conflicts = SpaceBooking.objects.filter(
             space=booking.space,
