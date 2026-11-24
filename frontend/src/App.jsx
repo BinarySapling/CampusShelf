@@ -1730,6 +1730,29 @@ function LibrarianSpaceBookingsPage({ setNotice }) {
 }
 
 
+function ScannedBook({ copy, busy, onIssue }) {
+  const book = copy.book;
+  return <section className="book-detail-hero" aria-label="Scanned book details">
+    <div className="detail-cover-wrap"><BookCover book={book} /></div>
+    <div>
+      <span className="eyebrow">SCANNED COPY / BOOK DETAILS</span>
+      <h3>{book.title}</h3>
+      <p>By {book.author}</p>
+      <p>{book.description || "No description has been added for this title."}</p>
+      <div className="slip-facts">
+        <span><small>Category</small><b>{book.category || "Uncategorised"}</b></span>
+        <span><small>ISBN</small><b>{book.isbn || "Not provided"}</b></span>
+        <span><small>Copy ID</small><b>{copy.copy_id}</b></span>
+        <span><small>Shelf</small><b>{copy.shelf || book.shelf || "Unassigned"}</b></span>
+        <span><small>Free copies / total</small><b>{book.available_to_borrow} / {book.total}</b></span>
+        <span><small>This copy</small><b>{copy.status === "available" ? "Available" : copy.status === "borrowed" ? "On loan" : copy.status}</b></span>
+      </div>
+      <p className="slip-help">{copy.status === "available" ? "Check these details, then confirm to borrow this exact copy." : "This copy is not available for checkout. Scan another copy."}</p>
+      {copy.status === "available" && <button className="button primary" disabled={busy} onClick={onIssue}>{busy ? "Checking out…" : "Confirm checkout"}</button>}
+    </div>
+  </section>;
+}
+
 function StudentPortal({ user, tab, setTab, setNotice, selectedBook, onOpenBook, onBackToBooks, onBookRatingChange }) {
   const [loans, setLoans] = useState([]);
   const [holds, setHolds] = useState([]);
@@ -1848,7 +1871,8 @@ function StudentPortal({ user, tab, setTab, setNotice, selectedBook, onOpenBook,
   if (tab === "scan_copy") return <>
     <PageTitle eyebrow="STUDENT PORTAL / READY TO BORROW" title="Scan your copy" note="Scan the QR label on your chosen physical copy, then confirm checkout." action={<button className="button light" onClick={onBackToBooks}>← Browse books</button>} />
     {slip && <IssueSlip loan={slip} onClose={() => setSlip(null)} />}
-    <section className="panel scan-student"><div><span className="eyebrow">READY TO BORROW</span><h3>Scan your copy</h3><p>Sign in first, scan the QR label, and confirm the issue. You can borrow up to five books.</p><button className="button primary" disabled={busy} onClick={() => setScanOpen((open) => !open)}>{scanOpen ? "Close camera" : "Open QR scanner"}</button></div><div className="scan-side">{copyInfo ? <><b>{copyInfo.book_title}</b><span>{copyInfo.copy_id}</span><span className={`status ${copyInfo.status}`}>{copyInfo.status}</span>{copyInfo.status === "available" && <button className="button dark" disabled={busy} onClick={issueCopy}>{busy ? "Checking out…" : "Confirm checkout"}</button>}</> : <span className="scan-symbol">⌗</span>}</div></section>
+    <section className="panel scan-student"><div><span className="eyebrow">READY TO BORROW</span><h3>Scan your copy</h3><p>Sign in first, scan the QR label, and confirm the issue. You can borrow up to five books.</p><button className="button primary" disabled={busy} onClick={() => setScanOpen((open) => !open)}>{scanOpen ? "Close camera" : "Open QR scanner"}</button></div><div className="scan-side"><span className="scan-symbol" aria-hidden="true">⌗</span><span>Scan a copy to see its full book details.</span></div></section>
+    {copyInfo && <ScannedBook copy={copyInfo} busy={busy} onIssue={issueCopy} />}
     <Scanner open={scanOpen} onScan={scanned} onError={(message) => noticeText(setNotice, message, "error")} />
   </>;
 
