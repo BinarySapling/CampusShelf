@@ -17,3 +17,12 @@ Fraunces is used for editorial headings, DM Sans for interface text, and DM Mono
 - Final clean browser session: no console errors.
 
 These checks cover the React portals and their existing APIs. Camera hardware scanning, physical QR print output, and third-party Gemini responses were not exercised during this visual redesign.
+
+## Follow-up verification: searchable selectors, fines, and covers
+
+- 41 backend regression tests passed; optional-cover and repeatable-seeding checks also passed after the final ISBN compatibility adjustment.
+- Browser: book search by author and ISBN, student search by ID and email, empty results, keyboard selection/Escape, circulation controlled selection, successful review/fine form submission, and form reset verified.
+- Cover image save/display, failed-image fallback, and restoring the default cover verified.
+- Mobile search picker checked at 390px without document overflow.
+- Production build passed; production dependency audit reported zero vulnerabilities.
+- Fine removal is librarian-only and applies to recorded unpaid fines. Paid receipts remain intact. Live overdue amounts must be finalised by returning the book first.

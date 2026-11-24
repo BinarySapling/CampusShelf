@@ -13,6 +13,7 @@ class Book(models.Model):
     available = models.BooleanField(default=False)
     shelf = models.CharField(max_length=30, blank=True)
     description = models.CharField(max_length=300, blank=True)
+    cover_url = models.URLField(max_length=1000, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:

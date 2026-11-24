@@ -646,6 +646,57 @@ class CampusShelfFeatureApiTests(TestCase):
         self.assertEqual(self.copy.status, BookCopy.BORROWED)
         self.assertEqual(self.copy.current_issue_code, loan.issue_code)
 
+    def test_optional_cover_is_validated_and_visible_in_catalogue(self):
+        values = {"title": "Cover Test", "author": "Reader", "category": "Fiction", "copies": 1,
+                  "shelf": "C-01", "cover_url": "https://example.com/cover.jpg"}
+        result = self.staff_client.post("/api/books/", values)
+        self.assertEqual(result.status_code, 201)
+        book = result.json()["book"]
+        self.assertEqual(book["cover_url"], values["cover_url"])
+        public = self.client.get("/api/catalogue/?q=Cover+Test").json()["results"][0]
+        self.assertEqual(public["cover_url"], values["cover_url"])
+        values["cover_url"] = "http://example.com/cover.jpg"
+        self.assertEqual(self.staff_client.post(f"/api/books/{book['id']}/", values).status_code, 400)
+        values["cover_url"] = ""
+        cleared = self.staff_client.post(f"/api/books/{book['id']}/", values)
+        self.assertEqual(cleared.status_code, 200)
+        self.assertEqual(cleared.json()["book"]["cover_url"], "")
+
+    def test_catalogue_seed_is_repeatable_and_preserves_existing_stock(self):
+        from django.core.management import call_command
+        from io import StringIO
+        call_command("seed_catalogue", copies=3, stdout=StringIO())
+        before = (Book.objects.count(), BookCopy.objects.count())
+        call_command("seed_catalogue", copies=3, stdout=StringIO())
+        self.assertEqual(before, (Book.objects.count(), BookCopy.objects.count()))
+        self.assertEqual(BookCopy.objects.values("copy_id").distinct().count(), BookCopy.objects.count())
+        self.assertTrue(Book.objects.filter(pk=self.book.pk).exists())
+        seeded = Book.objects.get(title="Deep Work")
+        self.assertEqual(seeded.total_copies, 3)
+        self.assertEqual(seeded.copies, 3)
+
+    def test_fine_removal_requires_staff_and_updates_student_balance(self):
+        member, student = self.make_student("REMOVE")
+        fine = FineEntry.objects.create(member=member, member_name=member.name,
+            student_id=member.student_id, amount=25, fine_type=FineEntry.CUSTOM, reason="Incorrect charge")
+        url = f"/api/fines/{fine.pk}/remove/"
+        self.assertEqual(Client().post(url).status_code, 401)
+        self.assertEqual(student.post(url).status_code, 403)
+        self.assertEqual(self.staff_client.get(url).status_code, 405)
+        self.assertEqual(self.staff_client.post(url).status_code, 200)
+        self.assertFalse(FineEntry.objects.filter(pk=fine.pk).exists())
+        self.assertEqual(student.get("/api/fines/").json()["results"], [])
+        self.assertEqual(self.staff_client.post(url).status_code, 404)
+
+    def test_paid_fine_receipt_cannot_be_removed(self):
+        member, _ = self.make_student("RECEIPT")
+        fine = FineEntry.objects.create(member=member, member_name=member.name,
+            student_id=member.student_id, amount=25, fine_type=FineEntry.CUSTOM,
+            reason="Paid receipt", status=FineEntry.PAID, paid_at=timezone.now())
+        response = self.staff_client.post(f"/api/fines/{fine.pk}/remove/")
+        self.assertEqual(response.status_code, 409)
+        self.assertTrue(FineEntry.objects.filter(pk=fine.pk).exists())
+
     def test_librarian_can_add_and_mark_a_custom_fine_paid(self):
         student_group, _ = Group.objects.get_or_create(name="Students")
         student_user = User.objects.create_user(

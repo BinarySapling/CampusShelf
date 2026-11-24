@@ -166,6 +166,7 @@ def book_data(book, rating_summary=None):
         "isbn": book.isbn or "",
         "shelf": book.shelf,
         "description": book.description,
+        "cover_url": book.cover_url,
         "available": available,
         "available_to_borrow": max(0, available - ready_reservations),
         "total": len(copies),
@@ -1217,6 +1218,19 @@ def mark_fine_paid(request, fine_id):
         fine.paid_at = timezone.now()
         fine.save(update_fields=["status", "paid_at"])
     return JsonResponse({"fine": fine_data(fine)})
+
+
+@librarian_api
+@require_POST
+def remove_fine(request, fine_id):
+    object_id = to_object_id(fine_id)
+    fine = FineEntry.objects.filter(pk=object_id).first() if object_id else None
+    if not fine:
+        return JsonResponse({"error": "Fine entry not found."}, status=404)
+    if fine.status != FineEntry.UNPAID:
+        return JsonResponse({"error": "Paid receipts cannot be removed."}, status=409)
+    FineEntry.objects.filter(pk=object_id, status=FineEntry.UNPAID).delete()
+    return JsonResponse({"message": "Unpaid fine removed."})
 
 
 @librarian_api

@@ -41,6 +41,7 @@ urlpatterns = [
     path("returns/copy/", api.return_copy, name="api_return_copy"),
     path("fines/", api.fines_list, name="api_fines"),
     path("fines/custom/", api.create_custom_fine, name="api_create_fine"),
+    path("fines/<str:fine_id>/remove/", api.remove_fine, name="api_remove_fine"),
     path("fines/<str:fine_id>/paid/", api.mark_fine_paid, name="api_mark_fine_paid"),
     path("reviews/", api.reviews_list, name="api_reviews"),
     path("reviews/add/", api.add_review, name="api_add_review"),

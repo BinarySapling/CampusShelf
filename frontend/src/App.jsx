@@ -6,6 +6,7 @@ import Chatbot from "./Chatbot.jsx";
 import LibraryArt from "./LibraryArt.jsx";
 import Preloader from "./Preloader.jsx";
 import CopyLabels from "./CopyLabels.jsx";
+import SearchPicker from "./SearchPicker.jsx";
 import { AnimatePresence, LazyMotion, domAnimation, m, useReducedMotion } from "motion/react";
 import { BookOpen, CalendarDays, ChartNoAxesCombined, CircleUserRound, ClipboardList, LayoutDashboard, LibraryBig, MapPin, Menu, Plus, Receipt, Repeat2, Sparkles, Star, Users, X } from "lucide-react";
 
@@ -66,12 +67,14 @@ function NavIcon({ name }) {
 }
 
 function BookCover({ book, compact = false }) {
+  const [failedUrl, setFailedUrl] = useState(null);
   const tone = (book.title?.charCodeAt(0) || 0) % 4;
   return <div className={`book-cover-visual tone-${tone} ${compact ? "compact" : ""}`} aria-hidden="true">
     <span>{book.category || "CampusShelf edition"}</span>
     <strong>{book.title}</strong>
     <small>{book.author}</small>
     <i />
+    {book.cover_url && book.cover_url !== failedUrl && <img className="custom-book-cover" src={book.cover_url} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailedUrl(book.cover_url)} />}
   </div>;
 }
 
@@ -249,6 +252,7 @@ function AddBookPage({ setNotice, onSaved, onCancel, book = null }) {
         <label>Author<input name="author" required maxLength="100" defaultValue={book?.author || ""} /></label>
         <div className="two-fields"><label>Category<input name="category" required maxLength="40" placeholder="Technology" defaultValue={book?.category || ""} /></label><label>ISBN<input name="isbn" maxLength="20" defaultValue={book?.isbn || ""} /></label></div>
         <div className="two-fields"><label>Number of physical copies<input name="copies" type="number" min="0" max="200" defaultValue={book?.total ?? 1} required /><small>Copies currently borrowed or held for pickup cannot be removed.</small></label><label>Shelf<input name="shelf" maxLength="30" placeholder="A-01" defaultValue={book?.shelf || ""} /></label></div>
+        <label>Cover image URL (optional)<input name="cover_url" type="url" maxLength="1000" placeholder="https://example.com/book-cover.jpg" defaultValue={book?.cover_url || ""} /><small>Paste an HTTPS image URL. Leave blank to use the default illustrated cover.</small></label>
         <label>Description<textarea name="description" maxLength="300" rows="4" placeholder="A short note about this title" defaultValue={book?.description || ""} /></label>
         <button className="button primary" disabled={busy}>{busy ? "Saving book…" : book ? "Save book changes" : "Save book"}</button>
       </form>
@@ -399,7 +403,7 @@ function LoansPage({ setNotice }) {
     <PageTitle eyebrow="CIRCULATION DESK / COPY QR" title="Issue and return books" note="Scan a copy label or type its Copy ID. A QR never approves a loan by itself." />
     <section className="panel action-panel"><div className="mode-switch"><button className={mode === "return" ? "selected" : ""} onClick={() => { setMode("return"); setScanInfo(null); }}>Return a copy</button><button className={mode === "issue" ? "selected" : ""} onClick={() => { setMode("issue"); setScanInfo(null); }}>Issue to student</button></div>
       <form className="issue-controls" onSubmit={submit}>
-        {mode === "issue" && <label>Approved student<select value={memberId} onChange={(event) => setMemberId(event.target.value)} required><option value="">Choose a student</option>{members.map((member) => <option value={member.id} key={member.id}>{member.name} · {member.student_id}</option>)}</select></label>}
+        {mode === "issue" && <SearchPicker label="Approved student" value={memberId} onChange={setMemberId} required options={members.map((member) => ({ value: member.id, label: member.name, detail: `${member.student_id} · ${member.email || member.course || ""}` }))} placeholder="Search student name or ID…" />}
         <label>Physical Copy ID<input value={copyId} onChange={(event) => setCopyId(event.target.value.toUpperCase())} placeholder="Scan the QR or type CSB-…" required /></label>
         <div className="button-line"><button className="button light" type="button" onClick={() => setScanOpen((open) => !open)}>{scanOpen ? "Close scanner" : "Open camera scanner"}</button><button className="button primary" disabled={busy || scanInfo?.returned || (scanInfo && mode === "return" && !scanInfo.active_loan) || (scanInfo && mode === "issue" && scanInfo.status !== "available")}>{busy ? "Saving…" : mode === "issue" ? "Confirm issue" : scanInfo?.returned ? "Return recorded" : scanInfo?.active_loan ? "Complete this return" : "Complete return"}</button></div>
       </form>
@@ -506,19 +510,30 @@ function FinesPage({ setNotice }) {
     }
   }
 
+  async function removeFine(fine) {
+    if (!window.confirm(`Remove the unpaid fine of ₹${fine.amount} for ${fine.member_name}? This cannot be undone.`)) return;
+    setBusy(true);
+    try {
+      await api(`/fines/${fine.id}/remove/`, { method: "POST", body: formBody({}) });
+      noticeText(setNotice, "Fine removed from the student account.");
+      await load();
+    } catch (error) { noticeText(setNotice, error.message, "error"); }
+    finally { setBusy(false); }
+  }
+
   return <>
     <PageTitle eyebrow="STUDENT ACCOUNTS / ₹20 PER DAY" title="Fine ledger" note="Current overdue amounts update by calendar day. Returned-book fines are saved as a fixed entry." />
     <div className="content-grid">
       <section className="panel"><div className="panel-head"><div><span className="eyebrow">LIBRARIAN ENTRY</span><h3>Add a custom fine</h3></div></div>
         <form className="stack-form compact" onSubmit={addFine}>
-          <label>Student<select name="member_id" required defaultValue=""><option value="" disabled>Choose a student</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name} · {member.student_id}</option>)}</select></label>
+          <SearchPicker label="Student" name="member_id" required loading={loading} options={members.map((member) => ({ value: member.id, label: member.name, detail: `${member.student_id} · ${member.email || member.course || ""}` }))} placeholder="Search student name or ID…" />
           <label>Amount in rupees<input name="amount" type="number" min="0.01" step="0.01" required /></label>
           <label>Reason<input name="reason" maxLength="200" required placeholder="Damaged cover" /></label>
           <button className="button primary" disabled={busy}>{busy ? "Saving…" : "Add unpaid fine"}</button>
         </form>
       </section>
       <section className="panel list-panel"><div className="panel-head"><div><span className="eyebrow">ALL RECORDS</span><h3>Fines and payments</h3></div><span className="pill">{fines.length} entries</span></div>
-        <div className="fine-list">{fines.map((fine) => <article className="fine-row" key={fine.id}><div className="fine-amount">₹{fine.amount}</div><div className="fine-info"><b>{fine.member_name} <small>{fine.student_id}</small></b><span>{fine.reason}</span><small>{fine.fine_type === "overdue" ? "Overdue fine" : "Custom fine"} · {new Date(fine.created_at).toLocaleDateString()}</small></div><span className={`status ${fine.status}`}>{fine.status}</span>{fine.status === "unpaid" && !fine.current && <button className="button light small" disabled={busy} onClick={() => markPaid(fine)}>Mark paid</button>}</article>)}{loading && <p className="empty">Loading fines…</p>}{!loading && fines.length === 0 && <p className="empty">There are no fines to show.</p>}</div>
+        <div className="fine-list">{fines.map((fine) => <article className="fine-row" key={fine.id}><div className="fine-amount">₹{fine.amount}</div><div className="fine-info"><b>{fine.member_name} <small>{fine.student_id}</small></b><span>{fine.reason}</span><small>{fine.fine_type === "overdue" ? "Overdue fine" : "Custom fine"} · {new Date(fine.created_at).toLocaleDateString()}</small></div><span className={`status ${fine.status}`}>{fine.status}</span>{fine.status === "unpaid" && (fine.current ? <small className="fine-live-note">Return the book to finalise this amount, then mark it paid or remove it.</small> : <div className="fine-actions"><button className="button light small" disabled={busy} onClick={() => markPaid(fine)}>Mark paid</button><button className="button danger small" disabled={busy} onClick={() => removeFine(fine)}>Remove fine</button></div>)}</article>)}{loading && <p className="empty">Loading fines…</p>}{!loading && fines.length === 0 && <p className="empty">There are no fines to show.</p>}</div>
       </section>
     </div>
   </>;
@@ -560,6 +575,12 @@ function AccountPage({ user, setNotice }) {
   </>;
 }
 
+async function loadBookChoices() {
+  const first = await api("/books/?page_size=100");
+  const pages = await Promise.all(Array.from({ length: Math.max(0, (first.pagination?.pages || 1) - 1) }, (_, index) => api(`/books/?page_size=100&page=${index + 2}`)));
+  return { results: [first, ...pages].flatMap((page) => page.results) };
+}
+
 function ReviewsPage({ setNotice }) {
   const [reviews, setReviews] = useState([]);
   const [books, setBooks] = useState([]);
@@ -569,7 +590,7 @@ function ReviewsPage({ setNotice }) {
   async function load() {
     setLoading(true);
     try {
-      const [reviewData, bookData, memberData] = await Promise.all([api("/reviews/"), api("/books/?page_size=100"), api("/members/catalogue/")]);
+      const [reviewData, bookData, memberData] = await Promise.all([api("/reviews/"), loadBookChoices(), api("/members/catalogue/")]);
       setReviews(reviewData.results);
       setBooks(bookData.results);
       setMembers(memberData.results);
@@ -598,8 +619,8 @@ function ReviewsPage({ setNotice }) {
     <div className="content-grid">
       <section className="panel"><div className="panel-head"><div><span className="eyebrow">SHARE A THOUGHT</span><h3>Write a review</h3></div></div>
         <form className="stack-form compact" onSubmit={submit}>
-          <label>Book<select name="book_id" required defaultValue=""><option value="" disabled>Choose a title</option>{books.map((book) => <option key={book.id} value={book.id}>{book.title}</option>)}</select></label>
-          <label>Student<select name="member_id" required defaultValue=""><option value="" disabled>Choose a student</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
+          <SearchPicker label="Book" name="book_id" required loading={loading} options={books.map((book) => ({ value: book.id, label: book.title, detail: `${book.author || ""} · ${book.isbn || ""} · Shelf ${book.shelf || "Unassigned"}` }))} placeholder="Search title, author, or ISBN…" />
+          <SearchPicker label="Student" name="member_id" required loading={loading} options={members.map((member) => ({ value: member.id, label: member.name, detail: `${member.student_id} · ${member.email || member.course || ""}` }))} placeholder="Search student name or ID…" />
           <label>Rating<select name="rating" defaultValue="5">{[5, 4, 3, 2, 1].map((rating) => <option key={rating} value={rating}>{rating} / 5</option>)}</select></label>
           <label>Note<textarea name="comment" maxLength="500" rows="4" required /></label>
           <button className="button primary" disabled={busy}>{busy ? "Saving…" : "Save review"}</button>

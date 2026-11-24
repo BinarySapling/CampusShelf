@@ -119,3 +119,11 @@ Run Django tests with a MongoDB test database available. The test runner creates
 
 For MongoDB connection and feature details, see the [official Django MongoDB Backend documentation](https://www.mongodb.com/docs/languages/python/django-mongodb/current/).
 
+
+## Catalogue expansion and optional covers
+
+Run `python manage.py migrate` and then `python manage.py seed_catalogue --copies 6` against the intended database to add 40 varied seed titles and bring each to at least six active physical copies. The command preserves existing titles, users, loans, and cover choices and is safe to rerun. Each new copy receives its own QR identifier.
+
+The add/edit book form accepts an optional HTTPS cover image URL. Leave it blank for the default cover; failed images automatically fall back to that cover. Images are loaded by the browser without sending a referrer. The database stores only the URL.
+
+Book and student fields in circulation, custom fines, and review entry are searchable. Search books by title, author, ISBN, or shelf and students by name, ID, or email. Recorded unpaid fines can be marked paid or removed by librarians. Paid receipts are retained; live overdue estimates are finalised when the book is returned.

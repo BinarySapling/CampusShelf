@@ -19,10 +19,17 @@ class BookForm(forms.ModelForm):
             "copies",
             "shelf",
             "description",
+            "cover_url",
         ]
 
+    def clean_cover_url(self):
+        value = self.cleaned_data.get("cover_url", "").strip()
+        if value and not value.lower().startswith("https://"):
+            raise forms.ValidationError("Use a secure HTTPS image URL, or leave this blank for the default cover.")
+        return value
+
     def clean_isbn(self):
-        isbn = self.cleaned_data.get("isbn", "").strip()
+        isbn = (self.cleaned_data.get("isbn") or "").strip()
         matching_books = Book.objects.filter(isbn=isbn) if isbn else Book.objects.none()
         if self.instance and self.instance.pk:
             matching_books = matching_books.exclude(pk=self.instance.pk)
