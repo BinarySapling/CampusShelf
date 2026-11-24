@@ -1134,3 +1134,32 @@ td small { font-size: 11px; }
 @media (max-width: 520px) {
   .sidebar .sidebar-nav-trigger { min-height: 35px; padding-inline: 8px; }
 }
+
+/* Clear, evenly spaced figures for totals, money, dates, and identifiers. */
+:root { --numbers: "Inter", "Segoe UI", sans-serif; }
+.stat-card strong,
+.fine-amount,
+.transaction-amount,
+.student-fine-summary strong,
+.reader-rating-overview > strong,
+.detail-stats b,
+.book-rating small,
+.catalogue-footer,
+.pagination-controls,
+.notification-count,
+.report-rank > strong,
+.top-date,
+time,
+input[type="number"],
+input[type="date"],
+input[type="time"],
+.slip-facts b,
+.slip-qr b {
+  font-family: var(--numbers);
+  font-variant-numeric: lining-nums tabular-nums;
+}
+.stat-card strong { letter-spacing: -.8px; }
+code {
+  font-family: "DM Mono", Consolas, monospace;
+  font-variant-numeric: lining-nums tabular-nums;
+}
