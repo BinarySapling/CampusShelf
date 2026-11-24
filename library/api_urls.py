@@ -14,6 +14,7 @@ urlpatterns = [
     path("signup/", api.submit_signup, name="api_signup"),
     path("catalogue/", api.catalogue, name="api_catalogue"),
     path("dashboard/", api.dashboard_data, name="api_dashboard"),
+    path("notifications/", api.notifications_list, name="api_notifications"),
     path("reports/", api.reports_data, name="api_reports"),
     path("books/", api.books_api, name="api_books"),
     path("books/copies/", api.all_copies_list, name="api_all_book_copies"),

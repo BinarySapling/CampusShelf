@@ -1,6 +1,7 @@
 import json
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
+from decimal import Decimal
 from functools import wraps
 
 from bson import ObjectId
@@ -9,7 +10,8 @@ from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.forms import PasswordChangeForm
 from django.contrib.auth import login as auth_login
 from django.contrib.auth import logout as auth_logout
-from django.db.models import Q
+from django.db.models import Count, Q, Sum
+from django.db.models.functions import Coalesce
 from django.http import JsonResponse
 from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
@@ -153,10 +155,37 @@ def book_ratings_for_books(books):
     }
 
 
-def book_data(book, rating_summary=None):
-    copies = list(BookCopy.objects.filter(book=book).exclude(status=BookCopy.RETIRED))
-    available = sum(copy.status == BookCopy.AVAILABLE for copy in copies)
-    ready_reservations = BookReservation.objects.filter(book=book, status=BookReservation.READY).count()
+def book_inventory_summaries(books):
+    book_ids = [book.pk for book in books]
+    if not book_ids:
+        return {}, {}
+    copies = defaultdict(lambda: {"total": 0, "available": 0})
+    for book_id, status in BookCopy.objects.filter(book_id__in=book_ids).exclude(
+        status=BookCopy.RETIRED
+    ).values_list("book_id", "status"):
+        summary = copies[str(book_id)]
+        summary["total"] += 1
+        summary["available"] += status == BookCopy.AVAILABLE
+    ready_reservations = Counter(
+        str(book_id) for book_id in BookReservation.objects.filter(
+            book_id__in=book_ids, status=BookReservation.READY
+        ).values_list("book_id", flat=True)
+    )
+    return copies, ready_reservations
+
+
+def book_data(book, rating_summary=None, inventory=None, ready_reservations=None):
+    if inventory is None:
+        copies = list(BookCopy.objects.filter(book=book).exclude(status=BookCopy.RETIRED))
+        total = len(copies)
+        available = sum(copy.status == BookCopy.AVAILABLE for copy in copies)
+    else:
+        total = inventory.get(str(book.pk), {}).get("total", 0)
+        available = inventory.get(str(book.pk), {}).get("available", 0)
+    if ready_reservations is None:
+        reserved = BookReservation.objects.filter(book=book, status=BookReservation.READY).count()
+    else:
+        reserved = ready_reservations.get(str(book.pk), 0)
     rating_summary = rating_summary or {"average_rating": 0, "rating_count": 0}
     return {
         "id": str(book.pk),
@@ -168,22 +197,61 @@ def book_data(book, rating_summary=None):
         "description": book.description,
         "cover_url": book.cover_url,
         "available": available,
-        "available_to_borrow": max(0, available - ready_reservations),
-        "total": len(copies),
+        "available_to_borrow": max(0, available - reserved),
+        "total": total,
         "average_rating": rating_summary["average_rating"],
         "rating_count": rating_summary["rating_count"],
     }
 
 
-def borrowing_data(record):
+def borrowing_summaries(records):
+    records = list(records)
+    borrowing_ids = [record.pk for record in records]
+    book_ids = list({record.book_id for record in records if record.book_id})
+    if not borrowing_ids:
+        return {"latest_renewal": {}, "renewed": set(), "hold_members": {}}
+
+    latest_renewal = {}
+    latest_created = {}
+    renewed = set()
+    for borrowing_id, status, created_at in LoanRenewalRequest.objects.filter(
+        borrowing_id__in=borrowing_ids
+    ).values_list("borrowing_id", "status", "created_at"):
+        key = str(borrowing_id)
+        if key not in latest_created or created_at > latest_created[key]:
+            latest_created[key] = created_at
+            latest_renewal[key] = status
+        if status == LoanRenewalRequest.APPROVED:
+            renewed.add(key)
+
+    hold_members = defaultdict(set)
+    if book_ids:
+        for book_id, member_id in BookReservation.objects.filter(
+            book_id__in=book_ids,
+            status__in=[BookReservation.WAITING, BookReservation.READY],
+        ).values_list("book_id", "member_id"):
+            hold_members[str(book_id)].add(str(member_id) if member_id else "")
+
+    return {"latest_renewal": latest_renewal, "renewed": renewed, "hold_members": hold_members}
+
+
+def borrowing_data(record, summaries=None):
     days, amount = overdue_fine(record) if record.status == Borrowing.BORROWED else (0, 0)
     due_details = loan_due_details(record)
-    renewal = LoanRenewalRequest.objects.filter(borrowing=record).order_by("-created_at").first()
-    renewed = LoanRenewalRequest.objects.filter(borrowing=record, status=LoanRenewalRequest.APPROVED).exists()
-    other_holds = record.book_id and BookReservation.objects.filter(
-        book_id=record.book_id,
-        status__in=[BookReservation.WAITING, BookReservation.READY],
-    ).exclude(member_id=record.member_id).exists()
+    if summaries is None:
+        renewal = LoanRenewalRequest.objects.filter(borrowing=record).order_by("-created_at").first()
+        renewal_status = renewal.status if renewal else ""
+        renewed = LoanRenewalRequest.objects.filter(borrowing=record, status=LoanRenewalRequest.APPROVED).exists()
+        other_holds = record.book_id and BookReservation.objects.filter(
+            book_id=record.book_id,
+            status__in=[BookReservation.WAITING, BookReservation.READY],
+        ).exclude(member_id=record.member_id).exists()
+    else:
+        loan_key = str(record.pk)
+        renewal_status = summaries["latest_renewal"].get(loan_key, "")
+        renewed = loan_key in summaries["renewed"]
+        hold_members = summaries["hold_members"].get(str(record.book_id), set()) if record.book_id else set()
+        other_holds = any(member_id != str(record.member_id) for member_id in hold_members)
     return {
         "id": str(record.pk),
         "issue_code": record.issue_code,
@@ -202,8 +270,8 @@ def borrowing_data(record):
         "overdue_days": days,
         "current_fine": str(amount),
         **due_details,
-        "renewal_status": renewal.status if renewal else "",
-        "renewal_allowed": record.status == Borrowing.BORROWED and not renewed and not days and not other_holds and (not renewal or renewal.status != LoanRenewalRequest.PENDING),
+        "renewal_status": renewal_status,
+        "renewal_allowed": record.status == Borrowing.BORROWED and not renewed and not days and not other_holds and renewal_status != LoanRenewalRequest.PENDING,
     }
 
 
@@ -242,11 +310,13 @@ def paginated_books(request, queryset):
         start = (page_number - 1) * page_size
         books = list(queryset[start:start + page_size])
         ratings = book_ratings_for_books(books)
-        results = [book_data(book, ratings[str(book.pk)]) for book in books]
+        inventory, ready_reservations = book_inventory_summaries(books)
+        results = [book_data(book, ratings[str(book.pk)], inventory, ready_reservations) for book in books]
     else:
         books = list(queryset)
         ratings = book_ratings_for_books(books)
-        results = [book_data(book, ratings[str(book.pk)]) for book in books]
+        inventory, ready_reservations = book_inventory_summaries(books)
+        results = [book_data(book, ratings[str(book.pk)], inventory, ready_reservations) for book in books]
         if availability == {"available"}:
             results = [book for book in results if book["available_to_borrow"] > 0]
         elif availability == {"unavailable"}:
@@ -279,14 +349,33 @@ def fine_data(entry):
     }
 
 
-def reservation_data(reservation):
-    queue_position = None
-    if reservation.status == BookReservation.WAITING:
-        queue_position = BookReservation.objects.filter(
-            book=reservation.book,
-            status=BookReservation.WAITING,
-            created_at__lte=reservation.created_at,
-        ).count()
+def reservation_queue_positions(reservations):
+    book_ids = list({reservation.book_id for reservation in reservations if reservation.status == BookReservation.WAITING})
+    if not book_ids:
+        return {}
+    positions = {}
+    counts = defaultdict(int)
+    waiting = BookReservation.objects.filter(
+        book_id__in=book_ids, status=BookReservation.WAITING
+    ).order_by("book_id", "created_at", "pk").values_list("pk", "book_id")
+    for reservation_id, book_id in waiting:
+        book_key = str(book_id)
+        counts[book_key] += 1
+        positions[str(reservation_id)] = counts[book_key]
+    return positions
+
+
+def reservation_data(reservation, queue_positions=None):
+    if queue_positions is None:
+        queue_position = None
+        if reservation.status == BookReservation.WAITING:
+            queue_position = BookReservation.objects.filter(
+                book=reservation.book,
+                status=BookReservation.WAITING,
+                created_at__lte=reservation.created_at,
+            ).count()
+    else:
+        queue_position = queue_positions.get(str(reservation.pk))
     return {
         "id": str(reservation.pk),
         "book_id": str(reservation.book_id),
@@ -312,6 +401,7 @@ def renewal_data(item):
         "student_id": item.member.student_id,
         "student_name": item.member.name,
         "status": item.status,
+        "days_requested": item.days_requested,
         "due_at": item.borrowing.due_at.isoformat(),
         "created_at": item.created_at.isoformat(),
         "reviewed_at": item.reviewed_at.isoformat() if item.reviewed_at else "",
@@ -598,17 +688,44 @@ def review_signup(request, request_id, action):
 @librarian_api
 @require_GET
 def members_list(request):
-    members = Member.objects.filter(approval_status=Member.APPROVED)
+    members = list(Member.objects.filter(approval_status=Member.APPROVED))
+    if not members:
+        return JsonResponse({"results": []})
+    member_ids = [member.pk for member in members]
+    member_id_keys = {str(member.pk): member.student_id for member in members}
+    user_ids = [member.user_id for member in members if member.user_id]
+    active_user_ids = {
+        str(user_id) for user_id in User.objects.filter(pk__in=user_ids, is_active=True).values_list("pk", flat=True)
+    }
+
+    fixed_by_member = defaultdict(lambda: Decimal("0"))
+    fixed_by_student = defaultdict(lambda: Decimal("0"))
+    for member_id, student_id, amount in FineEntry.objects.filter(
+        status=FineEntry.UNPAID
+    ).values_list("member_id", "student_id", "amount"):
+        if member_id:
+            fixed_by_member[str(member_id)] += amount
+        else:
+            fixed_by_student[student_id] += amount
+
+    current_by_member = defaultdict(int)
+    current_by_student = defaultdict(int)
+    today = timezone.localdate()
+    for member_id, student_id, due_at in Borrowing.objects.filter(
+        status=Borrowing.BORROWED
+    ).values_list("member_id", "member_student_id", "due_at"):
+        days = max(0, (today - timezone.localtime(due_at).date()).days)
+        if days:
+            if member_id:
+                current_by_member[str(member_id)] += days * 20
+            else:
+                current_by_student[student_id] += days * 20
+
     results = []
     for member in members:
-        fixed_total = sum(
-            (fine.amount for fine in FineEntry.objects.filter(Q(member=member) | Q(member__isnull=True, student_id=member.student_id), status=FineEntry.UNPAID)),
-            start=0,
-        )
-        current_total = sum(
-            (overdue_fine(loan)[1] for loan in Borrowing.objects.filter(Q(member=member) | Q(member__isnull=True, member_student_id=member.student_id), status=Borrowing.BORROWED)),
-            start=0,
-        )
+        member_key = str(member.pk)
+        fixed_total = fixed_by_member[member_key] + fixed_by_student[member.student_id]
+        current_total = current_by_member[member_key] + current_by_student[member.student_id]
         results.append({
             "id": str(member.pk),
             "student_id": member.student_id,
@@ -617,7 +734,7 @@ def members_list(request):
             "course": member.course,
             "year": member.year,
             "approval_status": member.approval_status,
-            "portal_ready": bool(member.user and member.user.is_active),
+            "portal_ready": str(member.user_id) in active_user_ids if member.user_id else False,
             "fine_balance": str(fixed_total + current_total),
         })
     return JsonResponse({"results": results})
@@ -798,8 +915,22 @@ def scan_copy(request, copy_id):
 @librarian_api
 def loans_api(request):
     if request.method == "GET":
-        loans = Borrowing.objects.all()
-        return JsonResponse({"results": [borrowing_data(record) for record in loans]})
+        try:
+            page = max(1, int(request.GET.get("page", "1")))
+            page_size = min(50, max(1, int(request.GET.get("page_size", "25"))))
+        except ValueError:
+            page, page_size = 1, 25
+        queryset = Borrowing.objects.all()
+        total = queryset.count()
+        pages = max(1, (total + page_size - 1) // page_size)
+        page = min(page, pages)
+        start = (page - 1) * page_size
+        loans = list(queryset.order_by("-borrowed_at")[start:start + page_size])
+        summaries = borrowing_summaries(loans)
+        return JsonResponse({
+            "results": [borrowing_data(record, summaries) for record in loans],
+            "pagination": {"page": page, "page_size": page_size, "total": total, "pages": pages},
+        })
     if request.method != "POST":
         return JsonResponse({"error": "Use GET or POST."}, status=405)
 
@@ -858,7 +989,9 @@ def student_loans(request):
     loans = Borrowing.objects.filter(status__in=[Borrowing.BORROWED, Borrowing.RETURNED]).filter(
         Q(member=member) | Q(member__isnull=True, member_student_id=member.student_id)
     )
-    return JsonResponse({"results": [borrowing_data(record) for record in loans]})
+    records = list(loans)
+    summaries = borrowing_summaries(records)
+    return JsonResponse({"results": [borrowing_data(record, summaries) for record in records]})
 
 
 TRANSACTION_TYPES = {"checkout", "return", "renewal", "fine_added", "fine_paid"}
@@ -867,11 +1000,18 @@ TRANSACTION_TYPES = {"checkout", "return", "renewal", "fine_added", "fine_paid"}
 def transaction_history(request, member=None):
     query = request.GET.get("q", "").strip()[:100]
     event_types = {value.strip() for value in request.GET.getlist("type") if value.strip()}
-    event_type = next(iter(event_types)) if len(event_types) == 1 else ""
     if not event_types.issubset(TRANSACTION_TYPES):
         return JsonResponse({"error": "Choose a valid transaction type."}, status=400)
 
-    events = []
+    try:
+        page = max(1, int(request.GET.get("page", "1")))
+    except ValueError:
+        page = 1
+    try:
+        page_size = min(50, max(1, int(request.GET.get("page_size", "20"))))
+    except ValueError:
+        page_size = 20
+
     loan_query = Borrowing.objects.all()
     if member:
         loan_query = loan_query.filter(
@@ -885,35 +1025,6 @@ def transaction_history(request, member=None):
             | Q(member_name__icontains=query)
             | Q(member_student_id__icontains=query)
         )
-    if not event_type or event_type == "checkout":
-        events.extend({
-            "id": f"checkout-{record.pk}",
-            "type": "checkout",
-            "occurred_at": record.borrowed_at.isoformat(),
-            "title": record.book_title or "Book checkout",
-            "details": f"Copy {record.copy_id} checked out · Issue {record.issue_code}",
-            "student_name": record.member_name,
-            "student_id": record.member_student_id,
-            "copy_id": record.copy_id,
-            "issue_code": record.issue_code,
-            "status": record.status,
-            "amount": "",
-        } for record in loan_query)
-    if not event_type or event_type == "return":
-        events.extend({
-            "id": f"return-{record.pk}",
-            "type": "return",
-            "occurred_at": record.returned_at.isoformat(),
-            "title": record.book_title or "Book return",
-            "details": f"Copy {record.copy_id} returned · Issue {record.issue_code}",
-            "student_name": record.member_name,
-            "student_id": record.member_student_id,
-            "copy_id": record.copy_id,
-            "issue_code": record.issue_code,
-            "status": Borrowing.RETURNED,
-            "amount": "",
-        } for record in loan_query if record.returned_at)
-
     renewal_query = LoanRenewalRequest.objects.select_related("borrowing", "member")
     if member:
         renewal_query = renewal_query.filter(member=member)
@@ -925,20 +1036,6 @@ def transaction_history(request, member=None):
             | Q(member__name__icontains=query)
             | Q(member__student_id__icontains=query)
         )
-    if not event_type or event_type == "renewal":
-        events.extend({
-            "id": f"renewal-{item.pk}",
-            "type": "renewal",
-            "occurred_at": (item.reviewed_at or item.created_at).isoformat(),
-            "title": item.borrowing.book_title or "Loan renewal",
-            "details": f"Renewal request {item.status} · Issue {item.borrowing.issue_code}",
-            "student_name": item.member.name,
-            "student_id": item.member.student_id,
-            "copy_id": item.borrowing.copy_id,
-            "issue_code": item.borrowing.issue_code,
-            "status": item.status,
-            "amount": "",
-        } for item in renewal_query)
 
     fine_query = FineEntry.objects.all()
     if member:
@@ -954,53 +1051,119 @@ def transaction_history(request, member=None):
             | Q(borrowing__copy_id__icontains=query)
             | Q(borrowing__book_title__icontains=query)
         )
-    if not event_type or event_type in {"fine_added", "fine_paid"}:
-        for fine in fine_query:
-            borrowing = Borrowing.objects.filter(pk=fine.borrowing_id).first() if fine.borrowing_id else None
-            if not event_type or event_type == "fine_added":
-                events.append({
-                    "id": f"fine-added-{fine.pk}",
-                    "type": "fine_added",
-                    "occurred_at": fine.created_at.isoformat(),
-                    "title": fine.reason or "Fine added",
-                    "details": f"{fine.fine_type.title()} fine recorded",
-                    "student_name": fine.member_name,
-                    "student_id": fine.student_id,
-                    "copy_id": borrowing.copy_id if borrowing else "",
-                    "issue_code": borrowing.issue_code if borrowing else "",
-                    "status": fine.status,
-                    "amount": str(fine.amount),
-                })
-            if fine.paid_at and (not event_type or event_type == "fine_paid"):
-                events.append({
-                    "id": f"fine-paid-{fine.pk}",
-                    "type": "fine_paid",
-                    "occurred_at": fine.paid_at.isoformat(),
-                    "title": fine.reason or "Fine paid",
-                    "details": f"{fine.fine_type.title()} fine paid",
-                    "student_name": fine.member_name,
-                    "student_id": fine.student_id,
-                    "copy_id": borrowing.copy_id if borrowing else "",
-                    "issue_code": borrowing.issue_code if borrowing else "",
-                    "status": FineEntry.PAID,
-                    "amount": str(fine.amount),
-                })
 
-    if event_types:
-        events = [item for item in events if item["type"] in event_types]
-    events.sort(key=lambda item: datetime.fromisoformat(item["occurred_at"]).timestamp(), reverse=True)
-    try:
-        page = max(1, int(request.GET.get("page", "1")))
-    except ValueError:
-        page = 1
-    try:
-        page_size = min(50, max(1, int(request.GET.get("page_size", "20"))))
-    except ValueError:
-        page_size = 20
-    total = len(events)
+    selected_types = event_types or TRANSACTION_TYPES
+    counts = {}
+    if "checkout" in selected_types:
+        counts["checkout"] = loan_query.count()
+    if "return" in selected_types:
+        counts["return"] = loan_query.filter(returned_at__isnull=False).count()
+    if "renewal" in selected_types:
+        counts["renewal"] = renewal_query.count()
+    if "fine_added" in selected_types:
+        counts["fine_added"] = fine_query.count()
+    if "fine_paid" in selected_types:
+        counts["fine_paid"] = fine_query.filter(paid_at__isnull=False).count()
+
+    total = sum(counts.values())
     pages = max(1, (total + page_size - 1) // page_size)
     page = min(page, pages)
     start = (page - 1) * page_size
+    fetch_limit = start + page_size
+    events = []
+
+    if "checkout" in selected_types:
+        checkout_records = loan_query.order_by("-borrowed_at")[:fetch_limit]
+        events.extend({
+            "id": f"checkout-{record.pk}",
+            "type": "checkout",
+            "occurred_at": record.borrowed_at.isoformat(),
+            "title": record.book_title or "Book checkout",
+            "details": f"Copy {record.copy_id} checked out · Issue {record.issue_code}",
+            "student_name": record.member_name,
+            "student_id": record.member_student_id,
+            "copy_id": record.copy_id,
+            "issue_code": record.issue_code,
+            "status": record.status,
+            "amount": "",
+        } for record in checkout_records)
+    if "return" in selected_types:
+        returned_records = loan_query.filter(returned_at__isnull=False).order_by("-returned_at")[:fetch_limit]
+        events.extend({
+            "id": f"return-{record.pk}",
+            "type": "return",
+            "occurred_at": record.returned_at.isoformat(),
+            "title": record.book_title or "Book return",
+            "details": f"Copy {record.copy_id} returned · Issue {record.issue_code}",
+            "student_name": record.member_name,
+            "student_id": record.member_student_id,
+            "copy_id": record.copy_id,
+            "issue_code": record.issue_code,
+            "status": Borrowing.RETURNED,
+            "amount": "",
+        } for record in returned_records)
+    if "renewal" in selected_types:
+        renewal_records = renewal_query.annotate(
+            event_time=Coalesce("reviewed_at", "created_at")
+        ).order_by("-event_time")[:fetch_limit]
+        events.extend({
+            "id": f"renewal-{item.pk}",
+            "type": "renewal",
+            "occurred_at": (item.reviewed_at or item.created_at).isoformat(),
+            "title": item.borrowing.book_title or "Loan renewal",
+            "details": f"Renewal request {item.status} · Issue {item.borrowing.issue_code}",
+            "student_name": item.member.name,
+            "student_id": item.member.student_id,
+            "copy_id": item.borrowing.copy_id,
+            "issue_code": item.borrowing.issue_code,
+            "status": item.status,
+            "amount": "",
+        } for item in renewal_records)
+
+    fine_items = {}
+    if "fine_added" in selected_types:
+        for fine in fine_query.order_by("-created_at")[:fetch_limit]:
+            fine_items[str(fine.pk)] = fine
+    if "fine_paid" in selected_types:
+        for fine in fine_query.filter(paid_at__isnull=False).order_by("-paid_at")[:fetch_limit]:
+            fine_items[str(fine.pk)] = fine
+    fine_rows = list(fine_items.values())
+    borrowing_ids = {fine.borrowing_id for fine in fine_rows if fine.borrowing_id}
+    borrowings = {
+        str(item.pk): item for item in Borrowing.objects.filter(pk__in=list(borrowing_ids))
+    } if borrowing_ids else {}
+    for fine in fine_rows:
+        borrowing = borrowings.get(str(fine.borrowing_id)) if fine.borrowing_id else None
+        if "fine_added" in selected_types:
+            events.append({
+                "id": f"fine-added-{fine.pk}",
+                "type": "fine_added",
+                "occurred_at": fine.created_at.isoformat(),
+                "title": fine.reason or "Fine added",
+                "details": f"{fine.fine_type.title()} fine recorded",
+                "student_name": fine.member_name,
+                "student_id": fine.student_id,
+                "copy_id": borrowing.copy_id if borrowing else "",
+                "issue_code": borrowing.issue_code if borrowing else "",
+                "status": fine.status,
+                "amount": str(fine.amount),
+            })
+        if "fine_paid" in selected_types and fine.paid_at:
+            events.append({
+                "id": f"fine-paid-{fine.pk}",
+                "type": "fine_paid",
+                "occurred_at": fine.paid_at.isoformat(),
+                "title": fine.reason or "Fine paid",
+                "details": f"{fine.fine_type.title()} fine paid",
+                "student_name": fine.member_name,
+                "student_id": fine.student_id,
+                "copy_id": borrowing.copy_id if borrowing else "",
+                "issue_code": borrowing.issue_code if borrowing else "",
+                "status": FineEntry.PAID,
+                "amount": str(fine.amount),
+            })
+
+    events.sort(key=lambda item: item["occurred_at"], reverse=True)
     return JsonResponse({
         "results": events[start:start + page_size],
         "pagination": {"page": page, "page_size": page_size, "total": total, "pages": pages},
@@ -1022,8 +1185,9 @@ def student_transactions_list(request):
 @student_api
 def student_reservations(request):
     if request.method == "GET":
-        reservations = BookReservation.objects.filter(member=request.student_member)
-        return JsonResponse({"results": [reservation_data(item) for item in reservations]})
+        reservations = list(BookReservation.objects.filter(member=request.student_member))
+        queue_positions = reservation_queue_positions(reservations)
+        return JsonResponse({"results": [reservation_data(item, queue_positions) for item in reservations]})
     if request.method != "POST":
         return JsonResponse({"error": "Use GET or POST."}, status=405)
     form = BookReservationForm(request.POST)
@@ -1072,8 +1236,9 @@ def cancel_reservation(request, reservation_id):
 @librarian_api
 @require_GET
 def reservations_list(request):
-    reservations = BookReservation.objects.select_related("book", "member")
-    return JsonResponse({"results": [reservation_data(item) for item in reservations]})
+    reservations = list(BookReservation.objects.select_related("book", "member"))
+    queue_positions = reservation_queue_positions(reservations)
+    return JsonResponse({"results": [reservation_data(item, queue_positions) for item in reservations]})
 
 
 @student_api
@@ -1097,7 +1262,11 @@ def request_loan_renewal(request):
         status__in=[BookReservation.WAITING, BookReservation.READY],
     ).exclude(member=request.student_member).exists():
         return JsonResponse({"error": "Another student is waiting for this title, so this loan cannot be renewed."}, status=409)
-    item = LoanRenewalRequest.objects.create(borrowing=loan, member=request.student_member)
+    item = LoanRenewalRequest.objects.create(
+        borrowing=loan,
+        member=request.student_member,
+        days_requested=form.cleaned_data["days_requested"],
+    )
     return JsonResponse({"renewal": renewal_data(item)}, status=201)
 
 
@@ -1129,7 +1298,7 @@ def review_renewal(request, renewal_id, action):
             status__in=[BookReservation.WAITING, BookReservation.READY],
         ).exclude(member=item.member).exists():
             return JsonResponse({"error": "Another student is waiting for this title."}, status=409)
-        loan.due_at = loan.due_at + timedelta(days=14)
+        loan.due_at = loan.due_at + timedelta(days=item.days_requested)
         loan.save(update_fields=["due_at"])
         item.status = LoanRenewalRequest.APPROVED
     else:
@@ -1203,6 +1372,154 @@ def fines_list(request):
     return JsonResponse({"results": current_entries + fixed_entries})
 
 
+@require_GET
+def notifications_list(request):
+    """Build a small, live notification inbox from each portal's existing records."""
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Please sign in first."}, status=401)
+
+    now = timezone.now()
+    today = timezone.localdate(now)
+    notifications = []
+
+    def add_notice(notice_id, title, message, route, kind="info", created_at=None):
+        notifications.append({
+            "id": str(notice_id),
+            "title": title,
+            "message": message,
+            "route": route,
+            "kind": kind,
+            "created_at": created_at.isoformat() if created_at else now.isoformat(),
+        })
+
+    if is_librarian(request.user):
+        signup_requests = StudentSignupRequest.objects.filter(
+            status=StudentSignupRequest.PENDING
+        ).order_by("submitted_at")[:12]
+        for item in signup_requests:
+            add_notice(
+                f"signup:{item.pk}", "Student access request",
+                f"Review {item.name}'s request to join the library.", "requests", "action", item.submitted_at,
+            )
+
+        renewals = LoanRenewalRequest.objects.filter(
+            status=LoanRenewalRequest.PENDING
+        ).select_related("borrowing", "member").order_by("created_at")[:12]
+        for item in renewals:
+            add_notice(
+                f"renewal:{item.pk}", "Renewal request",
+                f"{item.member.name} requested more time for {item.borrowing.book_title or 'a book'}.",
+                "renewals", "action", item.created_at,
+            )
+
+        bookings = SpaceBooking.objects.filter(
+            status=SpaceBooking.PENDING
+        ).select_related("space", "member").order_by("created_at")[:12]
+        for item in bookings:
+            add_notice(
+                f"space-booking:{item.pk}", "Space booking needs review",
+                f"{item.student_name or item.member.name} requested {item.space_name or item.space.name}.",
+                "space_bookings", "action", item.created_at,
+            )
+
+        due_limit = timezone.make_aware(
+            datetime.combine(today, datetime.min.time()), timezone.get_current_timezone()
+        )
+        overdue_loans = Borrowing.objects.filter(
+            status=Borrowing.BORROWED, due_at__lt=due_limit
+        ).order_by("due_at")[:12]
+        for loan in overdue_loans:
+            days, amount = overdue_fine(loan, today=today)
+            add_notice(
+                f"overdue-loan:{loan.pk}:{loan.due_at.isoformat()}", "Overdue book",
+                f"{loan.book_title or 'A book'} · {loan.member_name or loan.member_student_id} is {days} day(s) late (₹{amount}).",
+                "loans", "urgent", loan.due_at,
+            )
+
+    else:
+        member = Member.objects.filter(
+            user=request.user, approval_status=Member.APPROVED
+        ).first()
+        if not member:
+            return JsonResponse({"error": "An approved student account is required."}, status=403)
+
+        due_limit = timezone.make_aware(
+            datetime.combine(today + timedelta(days=3), datetime.max.time()), timezone.get_current_timezone()
+        )
+        loans = Borrowing.objects.filter(
+            Q(member=member) | Q(member__isnull=True, member_student_id=member.student_id),
+            status=Borrowing.BORROWED,
+            due_at__lt=due_limit,
+        ).order_by("due_at")[:20]
+        for loan in loans:
+            due_day = timezone.localtime(loan.due_at).date()
+            days_until_due = (due_day - today).days
+            if days_until_due < 0:
+                days_late, amount = overdue_fine(loan, today=today)
+                add_notice(
+                    f"loan-overdue:{loan.pk}:{loan.due_at.isoformat()}", "Book is overdue",
+                    f"Return {loan.book_title or 'your book'} to the librarian. Fine accrued: ₹{amount} (₹20/day).",
+                    "my_loans", "urgent", loan.due_at,
+                )
+            else:
+                label = "today" if days_until_due == 0 else "tomorrow" if days_until_due == 1 else f"in {days_until_due} days"
+                add_notice(
+                    f"loan-due:{loan.pk}:{loan.due_at.isoformat()}", "Return reminder",
+                    f"{loan.book_title or 'Your book'} is due {label}.", "my_loans",
+                    "urgent" if days_until_due == 0 else "info", loan.due_at,
+                )
+
+        ready_holds = BookReservation.objects.filter(
+            member=member, status=BookReservation.READY
+        ).select_related("book").order_by("-updated_at")[:12]
+        for item in ready_holds:
+            add_notice(
+                f"hold-ready:{item.pk}:{item.updated_at.isoformat()}", "Your hold is ready",
+                f"{item.book_title} is ready for pickup at {item.book.shelf or 'the library desk'}.",
+                "my_holds", "success", item.updated_at,
+            )
+
+        recent_cutoff = now - timedelta(days=30)
+        reviewed_renewals = LoanRenewalRequest.objects.filter(
+            member=member, reviewed_at__gte=recent_cutoff,
+            status__in=[LoanRenewalRequest.APPROVED, LoanRenewalRequest.REJECTED],
+        ).select_related("borrowing").order_by("-reviewed_at")[:10]
+        for item in reviewed_renewals:
+            approved = item.status == LoanRenewalRequest.APPROVED
+            add_notice(
+                f"renewal-reviewed:{item.pk}:{item.reviewed_at.isoformat()}",
+                "Renewal approved" if approved else "Renewal update",
+                f"Your request for {item.borrowing.book_title or 'your book'} was {'approved' if approved else 'not approved'}.",
+                "my_loans", "success" if approved else "info", item.reviewed_at,
+            )
+
+        reviewed_bookings = SpaceBooking.objects.filter(
+            member=member, reviewed_at__gte=recent_cutoff,
+            status__in=[SpaceBooking.CONFIRMED, SpaceBooking.REJECTED],
+        ).order_by("-reviewed_at")[:10]
+        for item in reviewed_bookings:
+            approved = item.status == SpaceBooking.CONFIRMED
+            add_notice(
+                f"space-reviewed:{item.pk}:{item.reviewed_at.isoformat()}",
+                "Space booking confirmed" if approved else "Space booking update",
+                f"Your request for {item.space_name or 'a library space'} was {'confirmed' if approved else 'not approved'}.",
+                "space_bookings", "success" if approved else "info", item.reviewed_at,
+            )
+
+        unpaid_fines = FineEntry.objects.filter(
+            Q(member=member) | Q(member__isnull=True, student_id=member.student_id),
+            status=FineEntry.UNPAID,
+        ).order_by("-created_at")[:12]
+        for item in unpaid_fines:
+            add_notice(
+                f"fine:{item.pk}", "Unpaid library fine",
+                f"₹{item.amount} · {item.reason}", "my_fines", "urgent", item.created_at,
+            )
+
+    notifications.sort(key=lambda item: item["created_at"], reverse=True)
+    return JsonResponse({"results": notifications[:40]})
+
+
 @librarian_api
 @require_POST
 def create_custom_fine(request):
@@ -1257,17 +1574,24 @@ def remove_fine(request, fine_id):
 @librarian_api
 @require_GET
 def dashboard_data(request):
-    books = list(Book.objects.all())
-    loans = list(Borrowing.objects.filter(status=Borrowing.BORROWED))
-    overdue = sum(1 for loan in loans if overdue_fine(loan)[0] > 0)
-    due_soon = sum(1 for loan in loans if loan_due_details(loan)["due_status"] == "due_soon")
+    today = timezone.localdate()
+    day_start = timezone.make_aware(datetime.combine(today, datetime.min.time()), timezone.get_current_timezone())
+    due_soon_end = timezone.make_aware(
+        datetime.combine(today + timedelta(days=4), datetime.min.time()), timezone.get_current_timezone()
+    )
+    books_summary = Book.objects.aggregate(book_count=Count("pk"), total_copies=Sum("total_copies"))
+    loan_summary = Borrowing.objects.filter(status=Borrowing.BORROWED).aggregate(
+        active=Count("pk"),
+        overdue=Count("pk", filter=Q(due_at__lt=day_start)),
+        due_soon=Count("pk", filter=Q(due_at__gte=day_start, due_at__lt=due_soon_end)),
+    )
     return JsonResponse({
-        "books": len(books),
-        "copies": sum(book.total_copies for book in books),
+        "books": books_summary["book_count"],
+        "copies": books_summary["total_copies"] or 0,
         "members": Member.objects.filter(approval_status=Member.APPROVED).count(),
-        "active_loans": len(loans),
-        "overdue_loans": overdue,
-        "due_soon_loans": due_soon,
+        "active_loans": loan_summary["active"],
+        "overdue_loans": loan_summary["overdue"],
+        "due_soon_loans": loan_summary["due_soon"],
         "pending_requests": StudentSignupRequest.objects.filter(status=StudentSignupRequest.PENDING).count(),
         "unpaid_fines": FineEntry.objects.filter(status=FineEntry.UNPAID).count(),
     })
@@ -1285,38 +1609,45 @@ def reports_data(request):
         month_keys.append((f"{year:04d}-{month:02d}", year, month))
     start_year, start_month_zero = divmod(month_index - 5, 12)
     start = datetime(start_year, start_month_zero + 1, 1, tzinfo=timezone.get_current_timezone())
-    records = list(Borrowing.objects.all())
-    popular_counts = Counter(record.book_title for record in records if record.book_title)
     issue_counts = defaultdict(int)
     return_counts = defaultdict(int)
-    for record in records:
-        if record.borrowed_at and record.borrowed_at >= start:
-            issue_counts[timezone.localtime(record.borrowed_at).strftime("%Y-%m")] += 1
-        if record.returned_at and record.returned_at >= start:
-            return_counts[timezone.localtime(record.returned_at).strftime("%Y-%m")] += 1
+    for borrowed_at in Borrowing.objects.filter(borrowed_at__gte=start).values_list("borrowed_at", flat=True):
+        issue_counts[timezone.localtime(borrowed_at).strftime("%Y-%m")] += 1
+    for returned_at in Borrowing.objects.filter(returned_at__gte=start).values_list("returned_at", flat=True):
+        return_counts[timezone.localtime(returned_at).strftime("%Y-%m")] += 1
     circulation = [{
         "month": key,
         "label": datetime(year, month, 1).strftime("%b %Y"),
         "issues": issue_counts[key],
         "returns": return_counts[key],
     } for key, year, month in month_keys]
-    recent = Borrowing.objects.all()[:12]
+    popular = Borrowing.objects.exclude(book_title="").values("book_title").annotate(
+        borrowings=Count("pk")
+    ).order_by("-borrowings", "book_title")[:10]
+    recent = Borrowing.objects.order_by("-borrowed_at").values(
+        "issue_code", "book_title", "member_name", "member_student_id", "status", "borrowed_at", "due_at"
+    )[:12]
+    borrowing_totals = Borrowing.objects.aggregate(
+        total=Count("pk"),
+        active=Count("pk", filter=Q(status=Borrowing.BORROWED)),
+        returned=Count("pk", filter=Q(status=Borrowing.RETURNED)),
+    )
     return JsonResponse({
-        "popular_books": [{"title": title, "borrowings": count} for title, count in popular_counts.most_common(10)],
+        "popular_books": [{"title": item["book_title"], "borrowings": item["borrowings"]} for item in popular],
         "circulation": circulation,
         "recent_transactions": [{
-            "issue_code": item.issue_code,
-            "book_title": item.book_title,
-            "student_name": item.member_name,
-            "student_id": item.member_student_id,
-            "status": item.status,
-            "borrowed_at": item.borrowed_at.isoformat(),
-            "due_at": item.due_at.isoformat(),
+            "issue_code": item["issue_code"],
+            "book_title": item["book_title"],
+            "student_name": item["member_name"],
+            "student_id": item["member_student_id"],
+            "status": item["status"],
+            "borrowed_at": item["borrowed_at"].isoformat(),
+            "due_at": item["due_at"].isoformat(),
         } for item in recent],
         "totals": {
-            "borrowings": len(records),
-            "active": sum(item.status == Borrowing.BORROWED for item in records),
-            "returned": sum(item.status == Borrowing.RETURNED for item in records),
+            "borrowings": borrowing_totals["total"],
+            "active": borrowing_totals["active"],
+            "returned": borrowing_totals["returned"],
         },
     })
 

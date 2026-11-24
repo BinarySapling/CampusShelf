@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 
@@ -19,6 +20,11 @@ class Book(models.Model):
     class Meta:
         db_table = "books"
         ordering = ["title"]
+        indexes = [
+            models.Index(fields=["category", "title"], name="book_category_title_idx"),
+            models.Index(fields=["author", "title"], name="book_author_title_idx"),
+            models.Index(fields=["-created_at"], name="book_created_desc_idx"),
+        ]
 
     def __str__(self):
         return self.title
@@ -87,6 +93,7 @@ class StudentSignupRequest(models.Model):
     class Meta:
         db_table = "student_requests"
         ordering = ["-submitted_at"]
+        indexes = [models.Index(fields=["status", "-submitted_at"], name="signup_status_time_idx")]
 
     def __str__(self):
         return f"{self.name} · {self.status}"
@@ -121,6 +128,10 @@ class BookCopy(models.Model):
     class Meta:
         db_table = "book_copies"
         ordering = ["created_at"]
+        indexes = [
+            models.Index(fields=["book", "status"], name="book_copy_stock_lookup"),
+            models.Index(fields=["book", "copy_id"], name="copy_book_code_idx"),
+        ]
 
     def __str__(self):
         return self.copy_id
@@ -174,6 +185,14 @@ class Borrowing(models.Model):
     class Meta:
         db_table = "borrowings"
         ordering = ["-borrowed_at"]
+        indexes = [
+            models.Index(fields=["status", "due_at"], name="loans_due_status"),
+            models.Index(fields=["member", "status", "borrowed_at"], name="loan_member_status_date_idx"),
+            models.Index(fields=["member_student_id", "status", "borrowed_at"], name="loan_student_status_date_idx"),
+            models.Index(fields=["book", "status"], name="loan_book_status_idx"),
+            models.Index(fields=["copy_id", "status"], name="loan_copy_status_idx"),
+            models.Index(fields=["-borrowed_at"], name="borrowed_at_-1"),
+        ]
 
     def __str__(self):
         return self.issue_code
@@ -201,6 +220,10 @@ class BookReservation(models.Model):
     class Meta:
         db_table = "book_reservations"
         ordering = ["created_at"]
+        indexes = [
+            models.Index(fields=["book", "status", "created_at"], name="res_book_status_time_idx"),
+            models.Index(fields=["member", "status", "created_at"], name="res_member_status_time_idx"),
+        ]
 
     def __str__(self):
         return f"{self.member} · {self.book_title} · {self.status}"
@@ -218,6 +241,10 @@ class LoanRenewalRequest(models.Model):
 
     borrowing = models.ForeignKey(Borrowing, on_delete=models.CASCADE, related_name="renewal_requests")
     member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="renewal_requests")
+    days_requested = models.PositiveSmallIntegerField(
+        default=14,
+        validators=[MinValueValidator(1), MaxValueValidator(14)],
+    )
     status = models.CharField(max_length=12, choices=STATUS_CHOICES, default=PENDING)
     created_at = models.DateTimeField(default=timezone.now)
     reviewed_at = models.DateTimeField(null=True, blank=True)
@@ -232,6 +259,11 @@ class LoanRenewalRequest(models.Model):
     class Meta:
         db_table = "loan_renewal_requests"
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["borrowing", "-created_at"], name="renew_borrow_date_idx"),
+            models.Index(fields=["member", "status", "-reviewed_at"], name="renew_member_review_idx"),
+            models.Index(fields=["status", "created_at"], name="renew_status_date_idx"),
+        ]
 
     def __str__(self):
         return f"{self.borrowing.issue_code} · {self.status}"
@@ -284,6 +316,11 @@ class FineEntry(models.Model):
     class Meta:
         db_table = "fine_entries"
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["member", "status"], name="fine_member_status_idx"),
+            models.Index(fields=["student_id", "status"], name="fine_student_status_idx"),
+            models.Index(fields=["status", "-created_at"], name="fine_status_created_idx"),
+        ]
 
     def __str__(self):
         return f"₹{self.amount} · {self.member_name} · {self.status}"
@@ -313,6 +350,7 @@ class Review(models.Model):
     class Meta:
         db_table = "reviews"
         ordering = ["-created_at"]
+        indexes = [models.Index(fields=["book", "-created_at"], name="review_book_time_idx")]
 
     def __str__(self):
         return f"{self.rating}/5 · {self.book_title or self.book}"
@@ -392,6 +430,11 @@ class SpaceBooking(models.Model):
     class Meta:
         db_table = "space_bookings"
         ordering = ["-booking_date", "-start_time"]
+        indexes = [
+            models.Index(fields=["status", "-created_at"], name="space_status_date_idx"),
+            models.Index(fields=["member", "booking_date", "start_time"], name="space_member_slot_idx"),
+            models.Index(fields=["space", "booking_date", "status", "start_time"], name="space_slot_status_idx"),
+        ]
 
     def __str__(self):
         return f"{self.space_name} · {self.booking_date} {self.start_time}-{self.end_time} · {self.student_name} ({self.status})"

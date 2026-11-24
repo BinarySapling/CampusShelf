@@ -11,7 +11,7 @@ import { bookingEndTimes, bookingMinutes, bookingStartTimes, campusDateTime } fr
 import CatalogueExplorer from "./CatalogueExplorer.jsx";
 import { ActiveFilters, CheckboxGroup, RecordFilters, filterRows } from "./Filters.jsx";
 import { AnimatePresence, LazyMotion, domAnimation, m, useReducedMotion } from "motion/react";
-import { BookOpen, CalendarDays, ChartNoAxesCombined, CircleUserRound, ClipboardList, LayoutDashboard, LibraryBig, MapPin, Menu, Plus, Receipt, Repeat2, Sparkles, Star, Users, X } from "lucide-react";
+import { Bell, BookOpen, CalendarDays, ChartNoAxesCombined, Check, CheckCheck, CircleAlert, CircleUserRound, ClipboardList, Clock3, LayoutDashboard, LibraryBig, MapPin, Menu, Plus, Receipt, Repeat2, RotateCw, Sparkles, Star, Users, X } from "lucide-react";
 
 const librarianTabs = [
   ["overview", "Overview", "overview"],
@@ -90,7 +90,7 @@ function useAccessibleDialog(open, dialogRef, onClose) {
     if (!open) return undefined;
     const dialog = dialogRef.current;
     const previousFocus = document.activeElement;
-    const focusableSelector = "a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])";
+    const focusableSelector = "a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex]:not([tabindex='-1'])";
     const getFocusable = () => [...(dialog?.querySelectorAll(focusableSelector) || [])].filter((element) => element.getClientRects().length);
     const focusable = getFocusable();
     (focusable[0] || dialog)?.focus({ preventScroll: true });
@@ -127,6 +127,20 @@ function useAccessibleDialog(open, dialogRef, onClose) {
       });
     };
   }, [open, dialogRef]);
+}
+
+function handleTabListKeyDown(event, keys, idPrefix, setActiveTab) {
+  const currentIndex = keys.findIndex((key) => `${idPrefix}${key}` === event.currentTarget.id);
+  if (currentIndex < 0) return;
+  let nextIndex = currentIndex;
+  if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % keys.length;
+  else if (event.key === "ArrowLeft") nextIndex = (currentIndex - 1 + keys.length) % keys.length;
+  else if (event.key === "Home") nextIndex = 0;
+  else if (event.key === "End") nextIndex = keys.length - 1;
+  else return;
+  event.preventDefault();
+  setActiveTab(keys[nextIndex]);
+  document.getElementById(`${idPrefix}${keys[nextIndex]}`)?.focus();
 }
 
 function NavIcon({ name }) {
@@ -229,9 +243,11 @@ function Dashboard({ setNotice, onNavigate }) {
   useEffect(() => { load(); }, [load]);
   return <>
     <section className="dashboard-hero">
-      <div className="dashboard-hero-art" aria-hidden="true"><img src="/assets/library-dashboard-scene.jpg" alt="" fetchPriority="high" /></div>
-      <div className="dashboard-hero-copy"><span className="eyebrow">THE LIBRARY DESK</span><h2>Make room for the next great read.</h2><p>One place to care for the collection, keep circulation moving, and welcome new readers.</p><button className="button hero-action" onClick={() => onNavigate("loans")}>Open circulation <span aria-hidden="true">↗</span></button></div>
-      <div className="dashboard-stamp" aria-hidden="true"><span>READ</span><b>CS</b><span>RETURN · REPEAT</span></div>
+      <div className="dashboard-hero-art" aria-hidden="true">
+        <img className="dashboard-hero-background" src="/assets/library-dashboard-scene.jpg" alt="" fetchPriority="high" />
+        <div className="dashboard-hero-inset"><img src="/assets/study-space-pod.jpg" alt="" /><span>THE STUDY NOOK · ROOM TO THINK</span></div>
+      </div>
+      <div className="dashboard-hero-copy"><span className="eyebrow">THE LIBRARY DESK</span><h2>Make room for the next <em>great read.</em></h2><p>One place to care for the collection, keep circulation moving, and welcome new readers.</p><button className="button hero-action" onClick={() => onNavigate("loans")}>Open circulation <span aria-hidden="true">↗</span></button></div>
     </section>
     <div className="dashboard-intro"><div><span className="eyebrow">TODAY AT THE LIBRARY</span><h2>Here is what is happening.</h2></div><span className="dashboard-date">Your library, at a glance</span></div>
     {loadError && <LoadError message={loadError} onRetry={load} />}
@@ -405,6 +421,7 @@ function StudentsPage({ onAddFine }) {
 function LoansPage({ setNotice }) {
   const [loans, setLoans] = useState([]);
   const [members, setMembers] = useState([]);
+  const [pagination, setPagination] = useState({ page: 1, page_size: 25, total: 0, pages: 1 });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -413,21 +430,29 @@ function LoansPage({ setNotice }) {
   const [memberId, setMemberId] = useState("");
   const [scanOpen, setScanOpen] = useState(false);
   const [scanInfo, setScanInfo] = useState(null);
+  const membersLoaded = useRef(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (page = 1, forceMembers = false) => {
     setLoading(true);
     setLoadError("");
     try {
-      const [loanData, memberData] = await Promise.all([api("/loans/"), api("/members/catalogue/")]);
+      const params = new URLSearchParams({ page: String(page), page_size: "25" });
+      const requests = [api(`/loans/?${params}`)];
+      if (forceMembers || !membersLoaded.current) requests.push(api("/members/catalogue/"));
+      const [loanData, memberData] = await Promise.all(requests);
       setLoans(loanData.results);
-      setMembers(memberData.results);
+      setPagination(loanData.pagination || { page: 1, page_size: 25, total: loanData.results.length, pages: 1 });
+      if (memberData) {
+        setMembers(memberData.results);
+        membersLoaded.current = true;
+      }
     } catch (error) {
       setLoadError(error.message);
     } finally {
       setLoading(false);
     }
   }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(1, true); }, [load]);
 
   async function scanned(value) {
     setScanOpen(false);
@@ -463,7 +488,7 @@ function LoansPage({ setNotice }) {
           returned: true,
         });
       }
-      await load();
+      await load(1);
     } catch (error) {
       noticeText(setNotice, error.message, "error");
     } finally {
@@ -473,7 +498,7 @@ function LoansPage({ setNotice }) {
 
   return <>
     <PageTitle eyebrow="CIRCULATION DESK / COPY QR" title="Issue and return books" note="Scan a copy label or type its Copy ID. A QR never approves a loan by itself." />
-    {loadError && <LoadError message={loadError} onRetry={load} />}
+    {loadError && <LoadError message={loadError} onRetry={() => load(pagination.page)} />}
     <section className="panel action-panel"><div className="mode-switch"><button className={mode === "return" ? "selected" : ""} onClick={() => { setMode("return"); setScanInfo(null); }}>Return a copy</button><button className={mode === "issue" ? "selected" : ""} onClick={() => { setMode("issue"); setScanInfo(null); }}>Issue to student</button></div>
       <form className="issue-controls" onSubmit={submit}>
         {mode === "issue" && <SearchPicker label="Approved student" value={memberId} onChange={setMemberId} required loading={loading} options={members.map((member) => ({ value: member.id, label: member.name, detail: `${member.student_id} · ${member.email || member.course || ""}` }))} placeholder="Search student name or ID…" />}
@@ -483,8 +508,9 @@ function LoansPage({ setNotice }) {
       <Scanner open={scanOpen} onScan={scanned} onError={(message) => noticeText(setNotice, message, "error")} />
       {scanInfo && <div className={`scan-result-card ${scanInfo.returned ? "complete" : ""}`} role="status"><span className="scan-result-mark" aria-hidden="true">{scanInfo.returned ? "✓" : "⌗"}</span><div><span className="eyebrow">{scanInfo.returned ? "RETURN RECORDED" : "COPY SCANNED"}</span><b>{scanInfo.book_title || "Physical copy"}</b><small>{scanInfo.copy_id}{scanInfo.member_name ? ` · With ${scanInfo.member_name}` : ""}{scanInfo.issue_code ? ` · ${scanInfo.issue_code}` : ""}</small><p>{scanInfo.returned ? "This copy is available to borrow again." : mode === "return" && scanInfo.active_loan ? "Active loan found. Complete the return to update the copy and its transaction." : scanInfo.status === "available" ? "Available to borrow. Select a student before issuing." : "No active loan was found for this copy. Review its transaction history before changing its status."}</p></div><span className={`status ${scanInfo.returned ? "available" : scanInfo.active_loan ? "borrowed" : scanInfo.status}`}>{scanInfo.returned ? "Available" : scanInfo.active_loan ? "On loan" : scanInfo.status}</span></div>}
     </section>
-    <section className="panel"><div className="panel-head"><div><span className="eyebrow">COMPLETE HISTORY</span><h3>Transaction register</h3></div><span className="pill">{loans.length} records</span></div>
+    <section className="panel"><div className="panel-head"><div><span className="eyebrow">COMPLETE HISTORY</span><h3>Transaction register</h3></div><span className="pill">{pagination.total} records</span></div>
       <div className="table-scroll" aria-busy={loading}><table><thead><tr><th>Issue ID</th><th>Book / copy</th><th>Student</th><th>Due date</th><th>Current fine</th><th>Status</th></tr></thead><tbody>{loans.map((loan) => <tr key={loan.id}><td><code>{loan.issue_code}</code></td><td><b>{loan.book_title}</b><small>{loan.copy_id}</small></td><td>{loan.member_name}<small>{loan.student_id}</small></td><td>{new Date(loan.due_at).toLocaleDateString()}{["due_soon", "overdue"].includes(loan.due_status) && <small><span className={`status ${loan.due_status}`}>{loan.due_message}</span></small>}</td><td>{loan.current_fine === "0" ? "—" : `₹${loan.current_fine}`}</td><td><span className={`status ${loan.status}`}>{loan.status}</span></td></tr>)}</tbody></table>{loading && <LoadingState label="Loading issue records…" />}{!loading && !loadError && loans.length === 0 && <p className="empty" role="status">No books have been issued yet.</p>}</div>
+      {pagination.total > 0 && <div className="pagination-controls"><span>Showing {(pagination.page - 1) * pagination.page_size + 1}–{Math.min(pagination.page * pagination.page_size, pagination.total)} of {pagination.total}</span><div><button className="button light small" type="button" disabled={loading || pagination.page <= 1} onClick={() => load(pagination.page - 1)}>Previous</button><span>Page {pagination.page} of {pagination.pages}</span><button className="button light small" type="button" disabled={loading || pagination.page >= pagination.pages} onClick={() => load(pagination.page + 1)}>Next</button></div></div>}
     </section>
   </>;
 }
@@ -871,9 +897,9 @@ function RenewalsPage({ setNotice }) {
     finally { setBusyId(""); }
   }
   return <>
-    <PageTitle eyebrow="CIRCULATION / RENEWALS" title="Renewal requests" note="Approve one 14-day extension when the loan is current and no other student is waiting for the title." action={<button className="button light" disabled={loading} onClick={load}>{loading ? "Refreshing…" : "Refresh requests"}</button>} />
+    <PageTitle eyebrow="CIRCULATION / RENEWALS" title="Renewal requests" note="Review each requested extension of up to 14 days. Renewals are available when the loan is current and no other student is waiting for the title." action={<button className="button light" disabled={loading} onClick={load}>{loading ? "Refreshing…" : "Refresh requests"}</button>} />
     {loadError && <LoadError message={loadError} onRetry={load} />}
-    <section className="panel"><div className="reservation-list" aria-busy={loading}>{items.map((item) => <article className="reservation-row" key={item.id}><div className="reservation-mark" aria-hidden="true">↻</div><div className="reservation-info"><b>{item.book_title}</b><span>{item.student_name} · {item.student_id} · Copy {item.copy_id}</span><small>Requested {new Date(item.created_at).toLocaleDateString()} · Due {new Date(item.due_at).toLocaleDateString()} · {item.issue_code}</small></div><span className={`status ${item.status}`}>{item.status}</span>{item.status === "pending" && <div className="row-actions"><button className="button primary small" disabled={Boolean(busyId)} onClick={() => review(item, "approve")}>{busyId === item.id ? "Saving…" : "Approve +14 days"}</button><button className="button danger small" disabled={Boolean(busyId)} onClick={() => review(item, "reject")}>Decline</button></div>}</article>)}{loading && <LoadingState label="Loading renewal requests…" />}{!loading && !loadError && items.length === 0 && <p className="empty" role="status">No renewal requests yet.</p>}</div></section>
+    <section className="panel"><div className="reservation-list" aria-busy={loading}>{items.map((item) => <article className="reservation-row" key={item.id}><div className="reservation-mark" aria-hidden="true">↻</div><div className="reservation-info"><b>{item.book_title}</b><span>{item.student_name} · {item.student_id} · Copy {item.copy_id}</span><small>Requested {new Date(item.created_at).toLocaleDateString()} · {item.days_requested} day{item.days_requested === 1 ? "" : "s"} requested · Due {new Date(item.due_at).toLocaleDateString()} · {item.issue_code}</small></div><span className={`status ${item.status}`}>{item.status}</span>{item.status === "pending" && <div className="row-actions"><button className="button primary small" disabled={Boolean(busyId)} onClick={() => review(item, "approve")}>{busyId === item.id ? "Saving…" : `Approve +${item.days_requested} day${item.days_requested === 1 ? "" : "s"}`}</button><button className="button danger small" disabled={Boolean(busyId)} onClick={() => review(item, "reject")}>Decline</button></div>}</article>)}{loading && <LoadingState label="Loading renewal requests…" />}{!loading && !loadError && items.length === 0 && <p className="empty" role="status">No renewal requests yet.</p>}</div></section>
   </>;
 }
 
@@ -1092,25 +1118,37 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
         <span className="space-booking-visual-note" aria-hidden="true">READ · THINK · REPEAT</span>
       </section>}
 
-      <div className="subnav-tabs">
+      <div className="subnav-tabs" role="tablist" aria-label="Student space booking sections">
         <button
           type="button"
+          role="tab"
+          id="student-space-tab-browse"
+          aria-controls="student-space-panel-browse"
+          aria-selected={subTab === "browse"}
+          tabIndex={subTab === "browse" ? 0 : -1}
           className={`subnav-btn ${subTab === "browse" ? "active" : ""}`}
           onClick={() => setSubTab("browse")}
+          onKeyDown={(event) => handleTabListKeyDown(event, ["browse", "my_bookings"], "student-space-tab-", setSubTab)}
         >
           Explore Spaces &amp; Slots
         </button>
         <button
           type="button"
+          role="tab"
+          id="student-space-tab-my_bookings"
+          aria-controls="student-space-panel-my_bookings"
+          aria-selected={subTab === "my_bookings"}
+          tabIndex={subTab === "my_bookings" ? 0 : -1}
           className={`subnav-btn ${subTab === "my_bookings" ? "active" : ""}`}
           onClick={() => setSubTab("my_bookings")}
+          onKeyDown={(event) => handleTabListKeyDown(event, ["browse", "my_bookings"], "student-space-tab-", setSubTab)}
         >
           My Bookings {pendingCount > 0 && <span className="subnav-badge">{pendingCount} pending</span>}
         </button>
       </div>
 
-      {subTab === "browse" && (
-        <>
+      {subTab === "browse" ? (
+        <section id="student-space-panel-browse" className="booking-tab-panel" role="tabpanel" aria-labelledby="student-space-tab-browse" tabIndex={0}>
           <div className="space-filters">
             <div className="filter-group">
               <label className="filter-item">
@@ -1203,11 +1241,11 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
               <p className="empty" role="status">No spaces match the selected filters.</p>
             )}
           </div>
-        </>
-      )}
+        </section>
+      ) : <section id="student-space-panel-browse" role="tabpanel" aria-labelledby="student-space-tab-browse" hidden />}
 
-      {subTab === "my_bookings" && (
-        <section className="panel">
+      {subTab === "my_bookings" ? (
+        <section id="student-space-panel-my_bookings" className="panel" role="tabpanel" aria-labelledby="student-space-tab-my_bookings" tabIndex={0}>
           <div className="panel-head">
             <div>
               <span className="eyebrow">RESERVATIONS</span>
@@ -1272,7 +1310,7 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
             )}
           </div>
         </section>
-      )}
+      ) : <section id="student-space-panel-my_bookings" role="tabpanel" aria-labelledby="student-space-tab-my_bookings" hidden />}
 
       {bookingModal && (
         <div className="booking-modal-overlay" onClick={() => !submitting && setBookingModal(null)}>
@@ -1500,25 +1538,37 @@ function LibrarianSpaceBookingsPage({ setNotice }) {
         <StatCard label="Total Library Spaces" value={spaces.length || 10} note="Pods, rooms & slots" />
       </div>
 
-      <div className="subnav-tabs">
+      <div className="subnav-tabs" role="tablist" aria-label="Librarian space booking sections">
         <button
           type="button"
+          role="tab"
+          id="librarian-space-tab-requests"
+          aria-controls="librarian-space-panel-requests"
+          aria-selected={subTab === "requests"}
+          tabIndex={subTab === "requests" ? 0 : -1}
           className={`subnav-btn ${subTab === "requests" ? "active" : ""}`}
           onClick={() => setSubTab("requests")}
+          onKeyDown={(event) => handleTabListKeyDown(event, ["requests", "schedule"], "librarian-space-tab-", setSubTab)}
         >
           Booking Requests {pendingList.length > 0 && <span className="subnav-badge">{pendingList.length} pending</span>}
         </button>
         <button
           type="button"
+          role="tab"
+          id="librarian-space-tab-schedule"
+          aria-controls="librarian-space-panel-schedule"
+          aria-selected={subTab === "schedule"}
+          tabIndex={subTab === "schedule" ? 0 : -1}
           className={`subnav-btn ${subTab === "schedule" ? "active" : ""}`}
           onClick={() => setSubTab("schedule")}
+          onKeyDown={(event) => handleTabListKeyDown(event, ["requests", "schedule"], "librarian-space-tab-", setSubTab)}
         >
           Live Spaces &amp; Availability
         </button>
       </div>
 
-      {subTab === "requests" && (
-        <section className="panel">
+      {subTab === "requests" ? (
+        <section id="librarian-space-panel-requests" className="panel" role="tabpanel" aria-labelledby="librarian-space-tab-requests" tabIndex={0}>
           <div className="space-filters" style={{ margin: "0 0 16px" }}>
             <div className="filter-group">
 
@@ -1614,10 +1664,10 @@ function LibrarianSpaceBookingsPage({ setNotice }) {
             )}
           </div>
         </section>
-      )}
+      ) : <section id="librarian-space-panel-requests" role="tabpanel" aria-labelledby="librarian-space-tab-requests" hidden />}
 
-      {subTab === "schedule" && (
-        <section className="panel">
+      {subTab === "schedule" ? (
+        <section id="librarian-space-panel-schedule" className="panel" role="tabpanel" aria-labelledby="librarian-space-tab-schedule" tabIndex={0}>
           <div className="space-filters" style={{ margin: "0 0 18px" }}>
             <label className="filter-item">
               Check Schedule Date:
@@ -1673,7 +1723,7 @@ function LibrarianSpaceBookingsPage({ setNotice }) {
             {!loading && !loadError && spaces.length === 0 && <p className="empty" role="status">No library spaces are available for this date.</p>}
           </div>
         </section>
-      )}
+      ) : <section id="librarian-space-panel-schedule" role="tabpanel" aria-labelledby="librarian-space-tab-schedule" hidden />}
 
       {rejectingBooking && (
         <div className="booking-modal-overlay" onClick={() => setRejectingBooking(null)}>
@@ -1753,6 +1803,26 @@ function ScannedBook({ copy, busy, onIssue }) {
   </section>;
 }
 
+function RenewalRequestControl({ loan, days, busy, retry = false, onDaysChange, onRequest }) {
+  return <div className="renewal-request-controls">
+    <label>
+      <span className="sr-only">Extension length for {loan.book_title}</span>
+      <select
+        className="renewal-days-select"
+        aria-label={`Extension length for ${loan.book_title}`}
+        value={days}
+        disabled={busy}
+        onChange={(event) => onDaysChange(event.target.value)}
+      >
+        {Array.from({ length: 14 }, (_, index) => index + 1).map((count) => <option key={count} value={count}>{count} {count === 1 ? "day" : "days"}</option>)}
+      </select>
+    </label>
+    <button className="button light small" type="button" disabled={busy} onClick={() => onRequest(loan, Number(days))}>
+      {busy ? "Sending…" : retry ? "Request again" : "Request renewal"}
+    </button>
+  </div>;
+}
+
 function StudentPortal({ user, tab, setTab, setNotice, selectedBook, onOpenBook, onBackToBooks, onBookRatingChange }) {
   const [loans, setLoans] = useState([]);
   const [holds, setHolds] = useState([]);
@@ -1762,6 +1832,7 @@ function StudentPortal({ user, tab, setTab, setNotice, selectedBook, onOpenBook,
   const loadSequence = useRef(0);
   const [busy, setBusy] = useState(false);
   const [renewingLoanId, setRenewingLoanId] = useState("");
+  const [renewalDays, setRenewalDays] = useState({});
   const [copyId, setCopyId] = useState("");
   const [copyInfo, setCopyInfo] = useState(null);
   const [scanOpen, setScanOpen] = useState(false);
@@ -1841,12 +1912,12 @@ function StudentPortal({ user, tab, setTab, setNotice, selectedBook, onOpenBook,
     }
   }
 
-  async function requestRenewal(loan) {
+  async function requestRenewal(loan, daysRequested) {
     setRenewingLoanId(loan.id);
     try {
-      await api("/student/renewals/", { method: "POST", body: formBody({ loan_id: loan.id }) });
+      await api("/student/renewals/", { method: "POST", body: formBody({ loan_id: loan.id, days_requested: daysRequested }) });
       await load();
-      noticeText(setNotice, "Renewal request sent to the library.");
+      noticeText(setNotice, `Renewal request for ${daysRequested} day${daysRequested === 1 ? "" : "s"} sent to the library.`);
     } catch (error) {
       noticeText(setNotice, error.message, "error");
     } finally {
@@ -1888,7 +1959,12 @@ function StudentPortal({ user, tab, setTab, setNotice, selectedBook, onOpenBook,
     {loadError && <LoadError message={loadError} onRetry={load} />}
     {slip && <IssueSlip loan={slip} onClose={() => setSlip(null)} />}
     {dueAlerts.length > 0 && <section className="due-alert-list" aria-label="Due date alerts">{dueAlerts.map((loan) => <article className={`due-alert ${loan.due_status}`} key={loan.id}><span className="due-alert-icon" aria-hidden="true">{loan.due_status === "overdue" ? "!" : "◷"}</span><div><b>{loan.book_title}</b><span>{loan.due_message}{loan.due_status === "overdue" && Number(loan.current_fine) > 0 ? ` · Current fine ₹${loan.current_fine}` : ""}</span></div></article>)}</section>}
-    <section className="panel"><div className="table-scroll" aria-busy={loading}><table><thead><tr><th>Book</th><th>Copy ID</th><th>Issue ID</th><th>Due date</th><th>Fine today</th><th>Status</th><th>Renewal</th><th>Slip / return QR</th></tr></thead><tbody>{loans.map((loan) => <tr key={loan.id}><td><b>{loan.book_title}</b><small>{loan.book_author}</small></td><td><code>{loan.copy_id}</code></td><td><code>{loan.issue_code}</code></td><td>{new Date(loan.due_at).toLocaleDateString()}</td><td>{loan.current_fine === "0" ? "—" : `₹${loan.current_fine}`}</td><td><span className={`status ${loan.status}`}>{loan.status}</span></td><td>{loan.renewal_status === "pending" ? <span className="status pending">In review</span> : loan.renewal_status === "approved" ? <span className="status approved">Renewed</span> : loan.renewal_status === "rejected" ? <span className="renewal-rejected"><span className="status rejected">Declined</span>{loan.renewal_allowed && <button className="button light small" disabled={renewingLoanId === loan.id} onClick={() => requestRenewal(loan)}>{renewingLoanId === loan.id ? "Sending…" : "Request again"}</button>}</span> : loan.renewal_allowed ? <button className="button light small" disabled={renewingLoanId === loan.id} onClick={() => requestRenewal(loan)}>{renewingLoanId === loan.id ? "Sending…" : "Request renewal"}</button> : "—"}</td><td><button className="button light small" onClick={() => openIssueSlip(loan)}>{loan.status === "borrowed" ? "Open return QR & slip" : "Open issue slip"}</button></td></tr>)}</tbody></table>{loading && <LoadingState label="Loading your loans…" />}{!loading && !loadError && loans.length === 0 && <p className="empty" role="status">You do not have any loans yet.</p>}</div></section>
+    <section className="panel"><div className="table-scroll" aria-busy={loading}><table><thead><tr><th>Book</th><th>Copy ID</th><th>Issue ID</th><th>Due date</th><th>Fine today</th><th>Status</th><th>Renewal (up to 14 days)</th><th>Slip / return QR</th></tr></thead><tbody>{loans.map((loan) => {
+      const days = renewalDays[loan.id] || "14";
+      const renewing = renewingLoanId === loan.id;
+      const renewalControl = <RenewalRequestControl loan={loan} days={days} busy={renewing} onDaysChange={(value) => setRenewalDays((current) => ({ ...current, [loan.id]: value }))} onRequest={requestRenewal} />;
+      return <tr key={loan.id}><td><b>{loan.book_title}</b><small>{loan.book_author}</small></td><td><code>{loan.copy_id}</code></td><td><code>{loan.issue_code}</code></td><td>{new Date(loan.due_at).toLocaleDateString()}</td><td>{loan.current_fine === "0" ? "—" : `₹${loan.current_fine}`}</td><td><span className={`status ${loan.status}`}>{loan.status}</span></td><td>{loan.renewal_status === "pending" ? <span className="status pending">In review</span> : loan.renewal_status === "approved" ? <span className="status approved">Renewed</span> : loan.renewal_status === "rejected" ? <div className="renewal-rejected"><span className="status rejected">Declined</span>{loan.renewal_allowed && <RenewalRequestControl loan={loan} days={days} busy={renewing} retry onDaysChange={(value) => setRenewalDays((current) => ({ ...current, [loan.id]: value }))} onRequest={requestRenewal} />}</div> : loan.renewal_allowed ? renewalControl : "—"}</td><td><button className="button light small" onClick={() => openIssueSlip(loan)}>{loan.status === "borrowed" ? "Open return QR & slip" : "Open issue slip"}</button></td></tr>;
+    })}</tbody></table>{loading && <LoadingState label="Loading your loans…" />}{!loading && !loadError && loans.length === 0 && <p className="empty" role="status">You do not have any loans yet.</p>}</div></section>
   </>;
 
   if (tab === "my_holds") return <>
@@ -1906,6 +1982,95 @@ function StudentPortal({ user, tab, setTab, setNotice, selectedBook, onOpenBook,
     </section>
     <section className="panel"><div className="panel-head"><div><span className="eyebrow">YOUR ACCOUNT</span><h3>Fine history</h3></div><button className="button light small" disabled={loading} onClick={load}>{loading ? "Refreshing…" : "Refresh fines"}</button></div><div className="fine-list" aria-busy={loading}>{fines.map((fine) => <article className="fine-row" key={fine.id}><div className="fine-amount">₹{Number(fine.amount).toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</div><div className="fine-info"><b>{fine.reason}</b><span>{fine.fine_type === "overdue" ? "Overdue fine" : "Custom fine"}</span><small>{new Date(fine.created_at).toLocaleDateString()}{fine.paid_at ? ` · Paid ${new Date(fine.paid_at).toLocaleDateString()}` : ""}</small></div><span className={`status ${fine.status}`}>{fine.status}</span></article>)}{loading && <LoadingState label="Loading your fines…" />}{!loading && !loadError && fines.length === 0 && <p className="empty" role="status">You do not have any fines.</p>}</div></section>
   </>;
+}
+
+function NotificationCenter({ user, onNavigate }) {
+  const [items, setItems] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [readIds, setReadIds] = useState(() => {
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(`campusshelf.notifications.read.${user.role}.${user.id}`) || "[]");
+      return Array.isArray(stored) ? stored : [];
+    } catch {
+      return [];
+    }
+  });
+  const rootRef = useRef(null);
+  const storageKey = `campusshelf.notifications.read.${user.role}.${user.id}`;
+  const unreadCount = items.filter((item) => !readIds.includes(item.id)).length;
+  const refresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const result = await api("/notifications/");
+      setItems(result.results || []);
+    } catch {
+      // Keep the last successful snapshot visible while the service reconnects.
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const timer = window.setInterval(refresh, 60000);
+    return () => window.clearInterval(timer);
+  }, [refresh, user.id]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(readIds.slice(-250)));
+    } catch {
+      // Notifications still work for the current session if browser storage is disabled.
+    }
+  }, [readIds, storageKey]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const closeOutside = (event) => { if (!rootRef.current?.contains(event.target)) setOpen(false); };
+    const closeOnEscape = (event) => { if (event.key === "Escape") setOpen(false); };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  function markRead(id) {
+    setReadIds((current) => current.includes(id) ? current : [...current, id].slice(-250));
+  }
+
+  function openNotification(item) {
+    markRead(item.id);
+    setOpen(false);
+    onNavigate(item.route);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  return <div className="notification-center" ref={rootRef}>
+    <button className="notification-trigger" type="button" aria-label={`Notifications${unreadCount ? `, ${unreadCount} unread` : ""}`} aria-haspopup="dialog" aria-expanded={open} aria-controls="notification-popover" onClick={() => { setOpen((value) => !value); refresh(); }}>
+      <Bell size={18} strokeWidth={1.8} aria-hidden="true" />
+      {unreadCount > 0 && <span className="notification-count" aria-hidden="true">{unreadCount > 9 ? "9+" : unreadCount}</span>}
+    </button>
+    {open && <section className="notification-popover" id="notification-popover" role="dialog" aria-label="Notifications">
+      <div className="notification-popover-head"><div><span className="eyebrow">{user.role === "student" ? "YOUR LIBRARY" : "LIBRARY DESK"}</span><h2>Notifications <span>{unreadCount}</span></h2></div><button type="button" className="notification-close" aria-label="Close notifications" onClick={() => setOpen(false)}><X size={17} aria-hidden="true" /></button></div>
+      <div className="notification-actions">{unreadCount > 0 && <button className="notification-mark-all" type="button" onClick={() => setReadIds(items.map((item) => item.id))}><CheckCheck size={15} aria-hidden="true" /> Mark all as read</button>}<button className="notification-refresh" type="button" onClick={refresh} disabled={refreshing} aria-label="Refresh notifications"><RotateCw size={14} aria-hidden="true" className={refreshing ? "is-spinning" : ""} /> Refresh</button></div>
+      <div className="notification-list" aria-live="polite">
+        {items.map((item) => {
+          const isRead = readIds.includes(item.id);
+          const Icon = item.kind === "urgent" ? CircleAlert : item.kind === "success" ? Check : item.kind === "action" ? Clock3 : Bell;
+          return <button className={`notification-item ${isRead ? "is-read" : "is-unread"} ${item.kind || ""}`} type="button" key={item.id} onClick={() => openNotification(item)}>
+            <span className="notification-item-icon"><Icon size={17} strokeWidth={1.9} aria-hidden="true" /></span>
+            <span className="notification-item-copy"><b>{item.title}</b><span>{item.message}</span><small>{new Date(item.created_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}</small></span>
+            {!isRead && <span className="notification-unread-dot" aria-label="Unread" />}
+          </button>;
+        })}
+        {items.length === 0 && <div className="notification-empty"><span className="notification-empty-mark"><Check size={19} aria-hidden="true" /></span><b>All caught up</b><span>New reminders and updates will show here.</span></div>}
+      </div>
+      <div className="notification-foot"><span>Updates automatically every minute</span><span className="notification-live-dot" /> </div>
+    </section>}
+  </div>;
 }
 
 export default function App() {
@@ -1950,7 +2115,7 @@ export default function App() {
         return;
       }
       if (event.key !== "Tab") return;
-      const focusable = [...(sidebarRef.current?.querySelectorAll("a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])") || [])].filter((element) => element.getClientRects().length);
+      const focusable = [...(sidebarRef.current?.querySelectorAll("a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex]:not([tabindex='-1'])") || [])].filter((element) => element.getClientRects().length);
       if (!focusable.length) return;
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
@@ -1966,6 +2131,28 @@ export default function App() {
     document.body.style.overflow = "hidden";
     document.addEventListener("keydown", handleDrawerKeys);
     return () => { document.body.style.overflow = previousOverflow; document.removeEventListener("keydown", handleDrawerKeys); };
+  }, [menuOpen]);
+
+  useEffect(() => {
+    if (menuOpen) return undefined;
+    const closeGroups = () => sidebarRef.current?.querySelectorAll(".sidebar-nav-group[open]").forEach((group) => { group.open = false; });
+    const closeOnOutsideClick = (event) => {
+      if (!sidebarRef.current?.contains(event.target)) closeGroups();
+    };
+    const closeOnEscape = (event) => {
+      if (event.key !== "Escape") return;
+      const openGroups = [...(sidebarRef.current?.querySelectorAll(".sidebar-nav-group[open]") || [])];
+      if (!openGroups.length) return;
+      event.preventDefault();
+      closeGroups();
+      openGroups[openGroups.length - 1].querySelector("summary")?.focus();
+    };
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
   }, [menuOpen]);
 
   useEffect(() => {
@@ -2023,6 +2210,9 @@ export default function App() {
 
   const isStudent = user.role === "student";
   const tabs = isStudent ? studentTabs : librarianTabs;
+  const navigationGroups = isStudent
+    ? [["DISCOVER", ["catalogue", "scan_copy", "space_bookings"]], ["MY READING", ["my_loans", "my_history", "my_holds", "my_fines"]], ["ACCOUNT", ["account"]]]
+    : [["LIBRARY", ["overview", "books", "add_book", "reservations", "space_bookings"]], ["CIRCULATION", ["loans", "renewals", "transactions", "fines"]], ["COMMUNITY", ["requests", "students", "reviews"]], ["MANAGEMENT", ["reports", "account"]]];
   const activeTab = tab === "book_detail" || tab === "edit_book" ? "books" : tab === "student_book" ? "catalogue" : tab;
   const active = tabs.find((item) => item[0] === activeTab) || tabs[0];
   let content;
@@ -2051,13 +2241,20 @@ export default function App() {
     {menuOpen && <button className="nav-backdrop" type="button" aria-label="Close navigation" onClick={closeMobileMenu} />}
     <aside className="sidebar" id="portal-navigation" ref={sidebarRef} role={menuOpen ? "dialog" : undefined} aria-modal={menuOpen ? "true" : undefined} aria-label={menuOpen ? "Portal navigation" : undefined}>
       <button className="drawer-close" type="button" aria-label="Close navigation" ref={drawerCloseRef} onClick={closeMobileMenu}><X size={20} aria-hidden="true" /></button>
-      <div className="sidebar-brand"><img src="/assets/campusshelf-logo.svg" alt="" /><div><b>CampusShelf</b><small>{isStudent ? "STUDENT PORTAL" : "LIBRARIAN DESK"}</small></div></div>
-      <div className="sidebar-label">{isStudent ? "YOUR LIBRARY" : "WORKSPACE"}</div>
-      <nav aria-label={isStudent ? "Student portal" : "Librarian workspace"}>{tabs.map(([key, label, icon]) => <button type="button" className={activeTab === key ? "active" : ""} key={key} aria-current={activeTab === key ? "page" : undefined} onClick={() => { setTab(key); setMenuOpen(false); window.scrollTo({ top: 0 }); window.requestAnimationFrame(() => routeHeadingRef.current?.focus({ preventScroll: true })); }}><NavIcon name={icon} /><span>{label}</span>{activeTab === key && <span className="nav-active-dot" aria-hidden="true" />}</button>)}</nav>
-      {!isStudent && <div className="sidebar-help"><span className="eyebrow">QUICK NOTE</span><p>Scan the label on the physical copy, not the book cover.</p><a href="/admin/">Open Django Admin ↗</a></div>}
-      <div className="sidebar-user"><div className="avatar">{user.name.slice(0, 1).toUpperCase()}</div><div><b>{user.name}</b><small>{isStudent ? user.student_id : user.login_id}</small></div></div>
+      <div className="sidebar-brand"><span className="sidebar-brand-mark"><img src="/assets/campusshelf-logo.svg" alt="" /></span><div><b>CampusShelf</b><small>THE KNOWLEDGE CLUB</small></div></div>
+      <div className="sidebar-portal-label"><span>{isStudent ? "READER PORTAL" : "LIBRARIAN DESK"}</span><i aria-hidden="true" /> <small>ONLINE</small></div>
+      <nav className="sidebar-navigation" aria-label={isStudent ? "Student portal" : "Librarian workspace"}>{navigationGroups.map(([heading, keys]) => {
+        const groupTabs = keys.map((key) => tabs.find(([tabKey]) => tabKey === key)).filter(Boolean);
+        const groupIsActive = groupTabs.some(([key]) => activeTab === key);
+        return <details className={`sidebar-nav-group ${groupIsActive ? "has-active" : ""}`} key={heading}>
+          <summary className="sidebar-nav-trigger"><span>{heading}</span></summary>
+          <div className="sidebar-nav-items">{groupTabs.map(([key, label, icon]) => <button type="button" className={activeTab === key ? "active" : ""} key={key} aria-current={activeTab === key ? "page" : undefined} onClick={(event) => { setTab(key); setMenuOpen(false); event.currentTarget.closest("details")?.removeAttribute("open"); window.scrollTo({ top: 0 }); window.requestAnimationFrame(() => routeHeadingRef.current?.focus({ preventScroll: true })); }}><NavIcon name={icon} /><span>{label}</span>{activeTab === key && <span className="nav-active-dot" aria-hidden="true" />}</button>)}</div>
+        </details>;
+      })}</nav>
+      <div className="sidebar-help"><span className="eyebrow">{isStudent ? "QUICK TIP" : "AT THE DESK"}</span><p>{isStudent ? "Scan a copy ID to issue a book. Bring returns to the librarian." : "Scan a copy’s unique ID when issuing or receiving a return."}</p>{!isStudent && <a href="/admin/">Open Django Admin <span aria-hidden="true">↗</span></a>}</div>
+      <div className="sidebar-user"><div className="avatar">{user.name.slice(0, 1).toUpperCase()}</div><div className="sidebar-user-copy"><b>{user.name}</b><small>{isStudent ? `STUDENT ID · ${user.student_id}` : `STAFF ID · ${user.login_id}`}</small></div><span className="sidebar-online-dot" title="Signed in" aria-label="Signed in" /></div>
     </aside>
-    <main className="main-area" aria-hidden={menuOpen || undefined} inert={menuOpen || undefined}><header className="topbar"><button ref={menuToggleRef} className="menu-toggle" type="button" aria-label={menuOpen ? "Close navigation" : "Open navigation"} aria-expanded={menuOpen} aria-controls="portal-navigation" onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X size={21} aria-hidden="true" /> : <Menu size={21} aria-hidden="true" />}</button><div><span className="eyebrow">{isStudent ? "STUDENT PORTAL" : "LIBRARIAN WORKSPACE"}</span><h1 ref={routeHeadingRef} tabIndex={-1}>{active[1]}</h1></div><div className="topbar-right"><span className="portal-chip">{isStudent ? "Reader account" : "Library staff"}</span><span className="top-date"><time dateTime={new Date().toISOString().slice(0, 10)}>{new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</time></span><button className="signout-button" type="button" onClick={signOut}>Sign out</button></div></header>
+    <main className="main-area" aria-hidden={menuOpen || undefined} inert={menuOpen || undefined}><header className="topbar"><button ref={menuToggleRef} className="menu-toggle" type="button" aria-label={menuOpen ? "Close navigation" : "Open navigation"} aria-expanded={menuOpen} aria-controls="portal-navigation" onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X size={21} aria-hidden="true" /> : <Menu size={21} aria-hidden="true" />}</button><div><span className="eyebrow">{isStudent ? "STUDENT PORTAL" : "LIBRARIAN WORKSPACE"}</span><h1 ref={routeHeadingRef} tabIndex={-1}>{active[1]}</h1></div><div className="topbar-right"><span className="portal-chip">{isStudent ? "Reader account" : "Library staff"}</span><span className="top-date"><time dateTime={new Date().toISOString().slice(0, 10)}>{new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</time></span><NotificationCenter user={user} onNavigate={setTab} /><button className="signout-button" type="button" onClick={signOut}>Sign out</button></div></header>
       {notice && <div className={`notice ${notice.kind}`} role={notice.kind === "error" ? "alert" : "status"} aria-live={notice.kind === "error" ? "assertive" : "polite"}>{notice.text}<button type="button" aria-label="Dismiss notification" onClick={() => setNotice(null)}>×</button></div>}
       <LazyMotion features={domAnimation}><AnimatePresence mode="wait" initial={false}><m.div id="portal-content" tabIndex={-1} className="page-content" key={tab + (selectedBook?.id || "")} initial={reducedMotion ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: reducedMotion ? 0 : -6 }} transition={{ duration: reducedMotion ? 0 : .2 }}>{content}</m.div></AnimatePresence></LazyMotion>
     </main>

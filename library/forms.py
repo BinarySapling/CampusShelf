@@ -155,6 +155,10 @@ class BookReservationForm(forms.Form):
 
 class LoanRenewalRequestForm(forms.Form):
     loan_id = forms.CharField(max_length=32)
+    days_requested = forms.IntegerField(min_value=1, max_value=14, required=False, initial=14)
+
+    def clean_days_requested(self):
+        return self.cleaned_data.get("days_requested") or 14
 
 
 class ManualIssueForm(forms.Form):
