@@ -7,7 +7,7 @@ import LibraryArt from "./LibraryArt.jsx";
 import Preloader from "./Preloader.jsx";
 import CopyLabels from "./CopyLabels.jsx";
 import SearchPicker from "./SearchPicker.jsx";
-import { bookingEndTimes, bookingMinutes } from "./bookingTime.js";
+import { bookingEndTimes, bookingMinutes, bookingStartTimes, campusDateTime } from "./bookingTime.js";
 import CatalogueExplorer from "./CatalogueExplorer.jsx";
 import { ActiveFilters, CheckboxGroup, RecordFilters, filterRows } from "./Filters.jsx";
 import { AnimatePresence, LazyMotion, domAnimation, m, useReducedMotion } from "motion/react";
@@ -40,9 +40,11 @@ const studentTabs = [
   ["account", "Account", "account"],
 ];
 
+const noticeTimers = new WeakMap();
 function noticeText(setNotice, text, kind = "success") {
+  window.clearTimeout(noticeTimers.get(setNotice));
   setNotice({ text, kind });
-  window.setTimeout(() => setNotice(null), 4500);
+  noticeTimers.set(setNotice, window.setTimeout(() => { setNotice(null); noticeTimers.delete(setNotice); }, 4500));
 }
 
 function StatCard({ label, value, note }) {
@@ -765,11 +767,7 @@ function ReportsPage({ setNotice }) {
 const TIME_SLOTS = ["08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00", "20:00"];
 
 function getLocalDateStr(date = new Date()) {
-  const d = new Date(date);
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return campusDateTime(date).date;
 }
 
 function StudentSpaceBookingsPage({ user, setNotice }) {
@@ -818,9 +816,10 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
     setModalError("");
     let firstEmpty = presetSlot;
     if (!firstEmpty && space.schedule) {
-      firstEmpty = space.schedule.find((s) => s.status === "empty");
+      firstEmpty = space.schedule.find((s) => s.status === "empty" && s.bookable !== false);
     }
-    const startTime = firstEmpty ? firstEmpty.start : "09:00";
+    if (!firstEmpty) { noticeText(setNotice, "No future slots are available for this space on the selected date.", "error"); return; }
+    const startTime = firstEmpty.start;
     const validEnds = bookingEndTimes(TIME_SLOTS, startTime, space.space_type);
     const endTime = firstEmpty ? firstEmpty.end : (validEnds[0] || "10:00");
     setBookingModal(space);
@@ -872,6 +871,10 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
       return;
     }
 
+    if (!bookingStartTimes(TIME_SLOTS, bookingForm.date).includes(bookingForm.start_time)) {
+      setModalError("Choose a booking start time in the future.");
+      return;
+    }
     const attendees = Number(bookingForm.attendees_count) || 1;
     if (attendees < 1) {
       setModalError("Please enter at least 1 student.");
@@ -925,7 +928,7 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
 
   const filteredSpaces = spaces.filter((space) => {
     const matchesQuery = `${space.name} ${space.location} ${space.description} ${space.amenities}`.toLowerCase().includes(spaceQuery.trim().toLowerCase());
-    return matchesQuery && (!spaceType.length || spaceType.includes(space.space_type)) && (!availFilter.length || (availFilter.includes("empty_only") && space.empty_slots_count > 0) || (availFilter.includes("occupied_only") && (space.occupied_slots_count > 0 || space.pending_slots_count > 0)));
+    return matchesQuery && (!spaceType.length || spaceType.includes(space.space_type)) && (!availFilter.length || (availFilter.includes("empty_only") && (space.bookable_slots_count ?? space.empty_slots_count) > 0) || (availFilter.includes("occupied_only") && (space.occupied_slots_count > 0 || space.pending_slots_count > 0)));
   });
 
   const pendingCount = myBookings.filter((b) => b.status === "pending").length;
@@ -1011,16 +1014,16 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
                       {(space.schedule || []).map((slot, idx) => (
                         <button
                           type="button"
-                          disabled={slot.status !== "empty"}
+                          disabled={slot.status !== "empty" || slot.bookable === false}
                           key={idx}
                           className={`slot-pill ${slot.status}`}
-                          title={`${slot.start}-${slot.end}: ${slot.status === "empty" ? "Empty / Click to book" : slot.status === "pending" ? "Pending approval" : "Occupied"}`}
+                          title={`${slot.start}-${slot.end}: ${slot.status === "empty" && slot.bookable === false ? "Elapsed slot" : slot.status === "empty" ? "Empty / Click to book" : slot.status === "pending" ? "Pending approval" : "Occupied"}`}
                           onClick={() => {
-                            if (slot.status === "empty") openBookingModal(space, slot);
+                            if (slot.status === "empty" && slot.bookable !== false) openBookingModal(space, slot);
                           }}
                         >
                           <span>{slot.start}</span>
-                          <small>{slot.status === "empty" ? "Empty" : slot.status === "pending" ? "Pending" : "Booked"}</small>
+                          <small>{slot.status === "empty" && slot.bookable === false ? "Elapsed" : slot.status === "empty" ? "Empty" : slot.status === "pending" ? "Pending" : "Booked"}</small>
                         </button>
                       ))}
                     </div>
@@ -1036,10 +1039,10 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
                   <button
                     type="button"
                     className="button primary small"
-                    disabled={space.empty_slots_count === 0}
+                    disabled={(space.bookable_slots_count ?? space.empty_slots_count) === 0}
                     onClick={() => openBookingModal(space)}
                   >
-                    {space.empty_slots_count === 0 ? "Fully Booked" : "Book Slot"}
+                    {(space.bookable_slots_count ?? space.empty_slots_count) === 0 ? "No future slots" : "Book Slot"}
                   </button>
                 </div>
               </article>
@@ -1168,7 +1171,11 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
                   value={bookingForm.date}
                   onChange={(e) => {
                     setModalError("");
-                    setBookingForm({ ...bookingForm, date: e.target.value });
+                    const date = e.target.value;
+                    const starts = bookingStartTimes(TIME_SLOTS, date);
+                    const start = starts.includes(bookingForm.start_time) ? bookingForm.start_time : (starts[0] || "");
+                    const ends = bookingEndTimes(TIME_SLOTS, start, bookingModal.space_type);
+                    setBookingForm({ ...bookingForm, date, start_time: start, end_time: ends.includes(bookingForm.end_time) ? bookingForm.end_time : (ends[0] || "") });
                   }}
                 />
               </label>
@@ -1181,7 +1188,7 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
                     value={bookingForm.start_time}
                     onChange={(e) => handleStartTimeChange(e.target.value)}
                   >
-                    {TIME_SLOTS.slice(0, -1).map((t) => (
+                    {bookingStartTimes(TIME_SLOTS, bookingForm.date).map((t) => (
                       <option key={t} value={t}>{t}</option>
                     ))}
                   </select>
@@ -1766,7 +1773,7 @@ export default function App() {
 
   const isStudent = user.role === "student";
   const tabs = isStudent ? studentTabs : librarianTabs;
-  const activeTab = tab === "book_detail" || tab === "add_book" || tab === "edit_book" ? "books" : tab === "student_book" ? "catalogue" : tab;
+  const activeTab = tab === "book_detail" || tab === "edit_book" ? "books" : tab === "student_book" ? "catalogue" : tab;
   const active = tabs.find((item) => item[0] === activeTab) || tabs[0];
   let content;
   if (tab === "account") content = <AccountPage user={user} setNotice={setNotice} />;

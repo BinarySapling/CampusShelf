@@ -13,6 +13,7 @@ export default function Scanner({ open, onScan, onError }) {
     if (!open) return undefined;
     let scanner;
     let stillOpen = true;
+    let decoded = false;
     import("html5-qrcode")
       .then(({ Html5QrcodeScanner }) => {
         if (!stillOpen) return;
@@ -22,7 +23,7 @@ export default function Scanner({ open, onScan, onError }) {
           false,
         );
         scanner.render(
-          (value) => onScanRef.current(value.trim()),
+          (value) => { if (stillOpen && !decoded) { decoded = true; onScanRef.current(value.trim()); } },
           (message) => {
             if (/camera|permission|notallowed|not found/i.test(message)) {
               onErrorRef.current?.("Allow camera access or choose a QR image to scan.");

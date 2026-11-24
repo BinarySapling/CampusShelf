@@ -135,7 +135,9 @@ def get_spaces_availability_data(target_date):
                     status = "occupied" if b.status == SpaceBooking.CONFIRMED else "pending"
                     break
             if status == "empty":
-                empty_hours.append(f"{start}-{end}")
+                now = timezone.localtime()
+                if target_date > now.date().isoformat() or (target_date == now.date().isoformat() and start > now.strftime("%H:%M")):
+                    empty_hours.append(f"{start}-{end}")
             elif status == "occupied":
                 occupied_hours.append(f"{start}-{end}")
             else:
@@ -150,6 +152,13 @@ def get_spaces_availability_data(target_date):
     return results
 
 
+def student_fine_balance(member):
+    from library.views import overdue_fine
+    fixed = FineEntry.objects.filter(Q(member=member) | Q(member__isnull=True, student_id=member.student_id), status=FineEntry.UNPAID)
+    loans = Borrowing.objects.filter(Q(member=member) | Q(member__isnull=True, member_student_id=member.student_id), status=Borrowing.BORROWED)
+    return sum((fine.amount for fine in fixed), 0) + sum((overdue_fine(loan)[1] for loan in loans), 0)
+
+
 def smart_local_response(query_text, student_member=None):
     """
     Intelligent domain assistant that provides 100% accurate, instant answers
@@ -161,13 +170,56 @@ def smart_local_response(query_text, student_member=None):
 
     target_date = extract_potential_date(text)
 
+    # 4. Student's personal loans, bookings, or account status
+    if student_member and (
+        ("my" in text and any(w in text for w in ["booking", "loan", "hold", "fine", "account", "record", "due", "status", "profile"]))
+        or any(k in text for k in ["my bookings", "my loans", "my holds", "my fines", "what did i book", "what did i borrow"])
+    ):
+        my_bookings = SpaceBooking.objects.filter(member=student_member).order_by("-booking_date", "-start_time")[:4]
+        my_loans = Borrowing.objects.filter(member=student_member, status=Borrowing.BORROWED)
+        lines = [f"👤 **Student Record for {student_member.name}** ({student_member.student_id}):\n"]
+
+        if my_bookings.exists():
+            lines.append("**Your Space Bookings:**")
+            for b in my_bookings:
+                lines.append(f"  • {b.space_name} on {b.booking_date} ({b.start_time}-{b.end_time}) — Status: **{b.get_status_display()}**")
+        else:
+            lines.append("**Space Bookings:** No active reservations.")
+
+        lines.append("")
+        if my_loans.exists():
+            lines.append("**Your Current Loans:**")
+            for l in my_loans:
+                lines.append(f"  • *{l.book_title}* (Due: {l.due_at.strftime('%Y-%m-%d')})")
+        else:
+            lines.append("**Current Loans:** No books checked out.")
+
+        lines.append(f"\n**Outstanding fine balance:** ₹{student_fine_balance(student_member)}. See My fines for details.")
+        return "\n".join(lines)
+
+    # 2. How to book a slot / booking procedure
+    if any(k in text for k in ["how to book", "how do i book", "how can i book", "how to reserve", "how do i reserve", "book slot", "booking procedure", "reserve slot", "reserve room", "reserve pod", "booking process"]):
+        return (
+            "### 📌 How to Book a Pod or Conference Room:\n\n"
+            "1. **Go to Room & Pods**: Click on the **Room & Pods** tab in the sidebar navigation.\n"
+            "2. **Check Availability**: View the live daily timeline. Green pills indicate **Empty** slots.\n"
+            "3. **Choose Space**: Click **Book Slot** on your desired pod/room (or click directly on any green empty slot pill).\n"
+            "4. **Fill Details**:\n"
+            "   - Select Date.\n"
+            "   - Pick a future Start Time and End Time (8:00 AM to 8:00 PM). Study pods have a 2-hour maximum per booking.\n"
+            "   - Specify the number of students (must not exceed space capacity).\n"
+            "   - Add an optional study topic/purpose.\n"
+            "5. **Submit Request**: Click **Book Slot (Send for Approval)**.\n\n"
+            "⏳ *Your request will be submitted in **Pending Approval** state. Once a librarian reviews and approves it, your reservation is confirmed!*"
+        )
+
     # 1. Asking about free slots, spaces, pods, or rooms
     if any(k in text for k in ["free slot", "which slot", "slot is free", "empty slot", "available slot", "pod", "room", "space availability", "study space"]):
         data = get_spaces_availability_data(target_date)
         lines = [f"Here is the real-time slot availability for **{target_date}**:\n"]
         for item in data[:6]:
             sp = item["space"]
-            free_str = ", ".join(item["empty"][:5]) if item["empty"] else "None (Fully Booked)"
+            free_str = ", ".join(item["empty"][:5]) if item["empty"] else "None available"
             if len(item["empty"]) > 5:
                 free_str += f" (+{len(item['empty']) - 5} more)"
             icon = "🎧" if sp.space_type == "pod" else "🏛️" if sp.space_type == "room" else "📖"
@@ -182,22 +234,6 @@ def smart_local_response(query_text, student_member=None):
 
         lines.append("💡 **To book a slot**: Open the **Room & Pods** tab in the sidebar, select your preferred time, and click **Book Slot (Send for Approval)**.")
         return "\n".join(lines)
-
-    # 2. How to book a slot / booking procedure
-    if any(k in text for k in ["how to book", "book slot", "booking procedure", "reserve slot", "reserve room", "reserve pod", "booking process"]):
-        return (
-            "### 📌 How to Book a Pod or Conference Room:\n\n"
-            "1. **Go to Room & Pods**: Click on the **Room & Pods** tab in the sidebar navigation.\n"
-            "2. **Check Availability**: View the live daily timeline. Green pills indicate **Empty** slots.\n"
-            "3. **Choose Space**: Click **Book Slot** on your desired pod/room (or click directly on any green empty slot pill).\n"
-            "4. **Fill Details**:\n"
-            "   - Select Date.\n"
-            "   - Pick Start Time and End Time (8:00 AM to 8:00 PM).\n"
-            "   - Specify the number of students (must not exceed space capacity).\n"
-            "   - Add an optional study topic/purpose.\n"
-            "5. **Submit Request**: Click **Book Slot (Send for Approval)**.\n\n"
-            "⏳ *Your request will be submitted in **Pending Approval** state. Once a librarian reviews and approves it, your reservation is confirmed!*"
-        )
 
     # 3. Book recommendations / catalogue search
     if any(k in text for k in ["recommend", "suggest", "book releted", "book related", "search book", "find book", "books on", "read"]):
@@ -226,32 +262,6 @@ def smart_local_response(query_text, student_member=None):
             lines.append("")
 
         lines.append("📖 You can find and reserve these under the **Discover** tab in the sidebar!")
-        return "\n".join(lines)
-
-    # 4. Student's personal loans, bookings, or account status
-    if student_member and (
-        ("my" in text and any(w in text for w in ["booking", "loan", "hold", "fine", "account", "record", "due", "status", "profile"]))
-        or any(k in text for k in ["my bookings", "my loans", "my holds", "my fines", "what did i book", "what did i borrow"])
-    ):
-        my_bookings = SpaceBooking.objects.filter(member=student_member).order_by("-booking_date", "-start_time")[:4]
-        my_loans = Borrowing.objects.filter(member=student_member, status=Borrowing.BORROWED)
-        lines = [f"👤 **Student Record for {student_member.name}** ({student_member.student_id}):\n"]
-
-        if my_bookings.exists():
-            lines.append("**Your Space Bookings:**")
-            for b in my_bookings:
-                lines.append(f"  • {b.space_name} on {b.booking_date} ({b.start_time}-{b.end_time}) — Status: **{b.get_status_display()}**")
-        else:
-            lines.append("**Space Bookings:** No active reservations.")
-
-        lines.append("")
-        if my_loans.exists():
-            lines.append("**Your Current Loans:**")
-            for l in my_loans:
-                lines.append(f"  • *{l.book_title}* (Due: {l.due_at.strftime('%Y-%m-%d')})")
-        else:
-            lines.append("**Current Loans:** No books checked out.")
-
         return "\n".join(lines)
 
     # 5. General platform help / login / signup
@@ -288,7 +298,7 @@ def build_system_context(student_member=None, query_text=""):
         space_summaries.append(
             f"• {sp.name} ({sp.get_space_type_display()}, Cap: {sp.capacity} students, Loc: {sp.location or 'Library'})\n"
             f"   - Amenities: {sp.amenities or 'Power, WiFi'}\n"
-            f"   - Free/Empty slots on {target_date}: {', '.join(item['empty']) if item['empty'] else 'None (Fully Booked)'}\n"
+            f"   - Free/Empty slots on {target_date}: {', '.join(item['empty']) if item['empty'] else 'None available'}\n"
             f"   - Confirmed/Booked: {', '.join(item['occupied']) if item['occupied'] else 'None'}\n"
             f"   - Pending Approval: {', '.join(item['pending']) if item['pending'] else 'None'}"
         )
@@ -323,7 +333,8 @@ def build_system_context(student_member=None, query_text=""):
             f"- Email: {student_member.email}\n"
             f"- Program: {student_member.course}, Year: {student_member.year}\n"
             f"- Active Space Bookings:\n{chr(10).join(booking_lines) if booking_lines else '  None'}\n"
-            f"- Active Book Loans:\n{chr(10).join(loan_lines) if loan_lines else '  None'}"
+            f"- Active Book Loans:\n{chr(10).join(loan_lines) if loan_lines else '  None'}\n"
+            f"- Outstanding fine balance: ₹{student_fine_balance(student_member)}"
         )
 
     system_prompt = f"""You are the official CampusShelf AI Library Assistant, an intelligent, polite, and helpful library concierge embedded into the CampusShelf web platform.
@@ -332,7 +343,7 @@ Today's local date is: {today.isoformat()} (Asia/Kolkata timezone). Target inqui
 YOUR CAPABILITIES & KNOWLEDGE:
 1. Space & Pod Booking Assistance:
    - Students can book study pods, duo pods, and conference rooms on the "Room & Pods" section of their portal.
-   - Booking process: Select space -> Choose date -> Pick Start and End time (between 08:00 and 20:00) -> Enter student count (up to space capacity) -> Click "Book Slot (Send for Approval)".
+   - Booking process: Select space -> Choose date -> Pick future Start and End times (between 08:00 and 20:00; study pods have a maximum of 2 hours per booking) -> Enter student count (up to space capacity) -> Click "Book Slot (Send for Approval)".
    - Workflow: When a student requests a slot, it starts in "Pending Approval" state. It goes to the Librarian portal. Once a librarian approves it, it becomes "Confirmed".
    - You can give exact availability for any space and hour based on real-time data below.
 
@@ -344,7 +355,7 @@ YOUR CAPABILITIES & KNOWLEDGE:
 3. Library Procedures & Operations:
    - Account Access: Students can sign up directly without librarian approval, and can log in using either their Student ID (e.g. STU-...) OR their email address!
    - Borrowing: Issued at the librarian desk.
-   - Returning: Returned to librarian desk or by scanning return slip QR.
+   - Returning: Bring the book and return-slip QR to the librarian, who scans it to complete the return.
    - Renewals: Can request renewal under the "My loans" tab.
    - Fines: Overdue books accrue daily late fines, visible under "My fines".
 

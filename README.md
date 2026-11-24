@@ -43,6 +43,14 @@ CampusShelf is a campus library app. React and Vite provide the browser interfac
 
    The seed command adds books and members only when those collections are empty. It does not create sample passwords.
 
+Run the read-only consistency audit before a release or after applying migrations:
+
+```powershell
+python manage.py audit_library
+```
+
+It checks MongoDB validator compatibility, catalogue stock totals, and active loan to copy status links. It reports findings without changing collection data.
+
 5. Install the frontend packages:
 
    ```powershell

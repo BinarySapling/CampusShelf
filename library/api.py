@@ -1,3 +1,4 @@
+import json
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from functools import wraps
@@ -10,7 +11,6 @@ from django.contrib.auth import login as auth_login
 from django.contrib.auth import logout as auth_logout
 from django.db.models import Q
 from django.http import JsonResponse
-from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_POST
@@ -602,11 +602,11 @@ def members_list(request):
     results = []
     for member in members:
         fixed_total = sum(
-            (fine.amount for fine in FineEntry.objects.filter(member=member, status=FineEntry.UNPAID)),
+            (fine.amount for fine in FineEntry.objects.filter(Q(member=member) | Q(member__isnull=True, student_id=member.student_id), status=FineEntry.UNPAID)),
             start=0,
         )
         current_total = sum(
-            (overdue_fine(loan)[1] for loan in Borrowing.objects.filter(member=member, status=Borrowing.BORROWED)),
+            (overdue_fine(loan)[1] for loan in Borrowing.objects.filter(Q(member=member) | Q(member__isnull=True, member_student_id=member.student_id), status=Borrowing.BORROWED)),
             start=0,
         )
         results.append({
@@ -715,7 +715,9 @@ def edit_book(request, book_id):
 @require_GET
 def copies_list(request, book_id):
     object_id = to_object_id(book_id)
-    book = get_object_or_404(Book, pk=object_id) if object_id else None
+    book = Book.objects.filter(pk=object_id).first() if object_id else None
+    if not book:
+        return JsonResponse({"error": "Book not found."}, status=404)
     copies = BookCopy.objects.filter(book=book).exclude(status=BookCopy.RETIRED).order_by("copy_id")
     active_loans = {}
     for loan in Borrowing.objects.filter(book=book, status=Borrowing.BORROWED).select_related("book_copy"):
@@ -1080,7 +1082,7 @@ def request_loan_renewal(request):
     if not form.is_valid():
         return JsonResponse({"errors": form_errors(form)}, status=400)
     loan_id = to_object_id(form.cleaned_data["loan_id"])
-    loan = Borrowing.objects.filter(pk=loan_id, member=request.student_member).first() if loan_id else None
+    loan = Borrowing.objects.filter(Q(member=request.student_member) | Q(member__isnull=True, member_student_id=request.student_member.student_id), pk=loan_id).first() if loan_id else None
     if not loan or loan.status != Borrowing.BORROWED:
         return JsonResponse({"error": "Only an active loan can be renewed."}, status=404)
     if overdue_fine(loan)[0] > 0:
@@ -1177,8 +1179,8 @@ def fines_list(request):
             return JsonResponse({"error": "An approved student account is required."}, status=403)
         # Older fine records may have lost their nullable member reference while
         # retaining the student ID snapshot. Keep those visible to that student.
-        entries = FineEntry.objects.filter(Q(member=member) | Q(student_id=member.student_id))
-        active_loans = Borrowing.objects.filter(member=member, status=Borrowing.BORROWED)
+        entries = FineEntry.objects.filter(Q(member=member) | Q(member__isnull=True, student_id=member.student_id))
+        active_loans = Borrowing.objects.filter(Q(member=member) | Q(member__isnull=True, member_student_id=member.student_id), status=Borrowing.BORROWED)
 
     fixed_entries = [fine_data(entry) for entry in entries]
     current_entries = []
@@ -1229,10 +1231,10 @@ def mark_fine_paid(request, fine_id):
     fine = FineEntry.objects.filter(pk=object_id).first() if object_id else None
     if not fine:
         return JsonResponse({"error": "Fine entry not found."}, status=404)
-    if fine.status == FineEntry.UNPAID:
-        fine.status = FineEntry.PAID
-        fine.paid_at = timezone.now()
-        fine.save(update_fields=["status", "paid_at"])
+    FineEntry.objects.filter(pk=object_id, status=FineEntry.UNPAID).update(status=FineEntry.PAID, paid_at=timezone.now())
+    fine = FineEntry.objects.filter(pk=object_id).first()
+    if not fine:
+        return JsonResponse({"error": "This fine was removed. Refresh the ledger."}, status=409)
     return JsonResponse({"fine": fine_data(fine)})
 
 
@@ -1245,7 +1247,9 @@ def remove_fine(request, fine_id):
         return JsonResponse({"error": "Fine entry not found."}, status=404)
     if fine.status != FineEntry.UNPAID:
         return JsonResponse({"error": "Paid receipts cannot be removed."}, status=409)
-    FineEntry.objects.filter(pk=object_id, status=FineEntry.UNPAID).delete()
+    deleted, _ = FineEntry.objects.filter(pk=object_id, status=FineEntry.UNPAID).delete()
+    if not deleted:
+        return JsonResponse({"error": "This fine changed. Refresh the ledger before removing it."}, status=409)
     return JsonResponse({"message": "Unpaid fine removed."})
 
 
@@ -1429,7 +1433,7 @@ def members_catalogue(request):
         "student_id": member.student_id,
         "name": member.name,
         "email": member.email,
-    } for member in Member.objects.filter(approval_status=Member.APPROVED)[:200]]})
+    } for member in Member.objects.filter(approval_status=Member.APPROVED)]})
 
 
 DEFAULT_LIBRARY_SPACES = [
@@ -1574,6 +1578,11 @@ def spaces_list(request):
     if not date_str:
         date_str = timezone.localdate().isoformat()
 
+    try:
+        date_str = datetime.strptime(date_str, "%Y-%m-%d").date().isoformat()
+    except ValueError:
+        return JsonResponse({"error": "Invalid date format. Use YYYY-MM-DD."}, status=400)
+    local_now = timezone.localtime()
     space_type = request.GET.get("type", "").strip()
     queryset = LibrarySpace.objects.filter(is_active=True)
     if space_type and space_type != "all":
@@ -1627,6 +1636,7 @@ def spaces_list(request):
                 "start": slot_start,
                 "end": slot_end,
                 "status": slot_status,
+                "bookable": slot_status == "empty" and (date_str > local_now.date().isoformat() or (date_str == local_now.date().isoformat() and slot_start > local_now.strftime("%H:%M"))),
             })
 
         empty_count = len(STANDARD_HOURLY_SLOTS) - occupied_count - pending_count
@@ -1641,17 +1651,29 @@ def spaces_list(request):
             "description": space.description,
             "amenities": space.amenities,
             "empty_slots_count": empty_count,
+            "bookable_slots_count": sum(slot["bookable"] for slot in schedule),
             "occupied_slots_count": occupied_count,
             "pending_slots_count": pending_count,
             "is_fully_booked": empty_count == 0,
             "schedule": schedule,
-            "bookings": [space_booking_data(b) for b in s_bookings],
+            "bookings": [space_booking_data(b) if is_librarian(request.user) else {"start_time": b.start_time, "end_time": b.end_time, "status": b.status} for b in s_bookings],
         })
 
     return JsonResponse({
         "date": date_str,
         "results": results,
     })
+
+
+def booking_start_error(booking_date, start_time):
+    try:
+        date = datetime.strptime(booking_date, "%Y-%m-%d").date()
+    except ValueError:
+        return "Invalid booking date."
+    now = timezone.localtime()
+    if date < now.date() or (date == now.date() and start_time <= now.strftime("%H:%M")):
+        return "Choose a booking start time in the future."
+    return ""
 
 
 def space_booking_time_error(space, start_time, end_time):
@@ -1687,6 +1709,7 @@ def create_space_booking(request):
     booking_date = data["booking_date"].strip()
     try:
         parsed_date = datetime.strptime(booking_date, "%Y-%m-%d").date()
+        booking_date = parsed_date.isoformat()
     except ValueError:
         return JsonResponse({"error": "Invalid date format. Use YYYY-MM-DD."}, status=400)
 
@@ -1698,6 +1721,9 @@ def create_space_booking(request):
     time_error = space_booking_time_error(space, start_time, end_time)
     if time_error:
         return JsonResponse({"error": time_error}, status=400)
+
+    if booking_start_error(booking_date, start_time):
+        return JsonResponse({"error": booking_start_error(booking_date, start_time)}, status=400)
 
     attendees_count = data["attendees_count"]
     if attendees_count > space.capacity:
@@ -1806,6 +1832,11 @@ def review_space_booking(request, booking_id, action):
         return JsonResponse({"error": f"This booking is already {booking.status}."}, status=400)
 
     if action == "approve":
+        if not booking.space.is_active:
+            return JsonResponse({"error": "This space is no longer available for booking."}, status=409)
+        start_error = booking_start_error(booking.booking_date, booking.start_time)
+        if start_error:
+            return JsonResponse({"error": start_error}, status=400)
         time_error = space_booking_time_error(booking.space, booking.start_time, booking.end_time)
         if time_error:
             return JsonResponse({"error": time_error}, status=400)
@@ -1858,27 +1889,37 @@ def chat_assistant(request):
         ).first()
 
     try:
-        if request.content_type == "application/json":
-            payload = json.loads(request.body.decode("utf-8"))
-        else:
-            payload = request.POST
-    except Exception:
-        payload = request.POST
-
-    messages_raw = payload.get("messages")
-    if isinstance(messages_raw, str):
+        payload = json.loads(request.body.decode("utf-8")) if request.content_type == "application/json" else request.POST
+    except (ValueError, UnicodeDecodeError):
+        return JsonResponse({"error": "Send a valid JSON message."}, status=400)
+    if not hasattr(payload, "get"):
+        return JsonResponse({"error": "Send a message object."}, status=400)
+    messages = payload.get("messages")
+    if isinstance(messages, str):
         try:
-            messages = json.loads(messages_raw)
-        except Exception:
-            messages = [{"role": "user", "text": messages_raw}]
-    elif isinstance(messages_raw, list):
-        messages = messages_raw
-    else:
-        text = payload.get("message", "").strip() or payload.get("text", "").strip()
-        messages = [{"role": "user", "text": text}] if text else []
-
-    if not messages:
+            messages = json.loads(messages)
+        except ValueError:
+            messages = [{"role": "user", "text": messages}]
+    if messages is None:
+        text = payload.get("message") or payload.get("text") or ""
+        messages = [{"role": "user", "text": text}]
+    if not isinstance(messages, list) or not messages:
         return JsonResponse({"error": "A message or question is required."}, status=400)
+    cleaned_messages = []
+    for message in messages[-20:]:
+        if not isinstance(message, dict) or not isinstance(message.get("text"), str):
+            return JsonResponse({"error": "Each message must contain text."}, status=400)
+        role = message.get("role", "user")
+        if role not in ("user", "model", "assistant"):
+            return JsonResponse({"error": "Invalid message role."}, status=400)
+        text = message["text"].strip()
+        if len(text) > 4000:
+            return JsonResponse({"error": "Keep each message under 4,000 characters."}, status=400)
+        if text:
+            cleaned_messages.append({"role": role, "text": text})
+    if not cleaned_messages or cleaned_messages[-1]["role"] != "user":
+        return JsonResponse({"error": "A message or question is required."}, status=400)
+    messages = cleaned_messages
 
     from library.gemini_service import call_gemini
 

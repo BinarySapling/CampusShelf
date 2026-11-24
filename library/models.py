@@ -307,7 +307,7 @@ class Review(models.Model):
     book_title = models.CharField(max_length=120, blank=True)
     member_name = models.CharField(max_length=100, blank=True)
     rating = models.PositiveSmallIntegerField()
-    comment = models.CharField(max_length=500)
+    comment = models.CharField(max_length=500, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:

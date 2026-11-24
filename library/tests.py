@@ -735,6 +735,144 @@ class CampusShelfFeatureApiTests(TestCase):
         self.assertEqual(fine.status, FineEntry.PAID)
         self.assertIsNotNone(fine.paid_at)
 
+    def test_read_only_database_audit_detects_stock_drift(self):
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+        from io import StringIO
+        call_command("audit_library", stdout=StringIO())
+        Book.objects.filter(pk=self.book.pk).update(copies=0)
+        with self.assertRaises(CommandError):
+            call_command("audit_library", stdout=StringIO(), stderr=StringIO())
+        self.book.refresh_from_db()
+        self.assertEqual(self.book.copies, 0)
+
+    def test_shared_space_schedule_does_not_expose_other_students_details(self):
+        member, owner = self.make_student("SPACEOWNER")
+        _, viewer = self.make_student("SPACEVIEWER")
+        pod = LibrarySpace.objects.create(name="Private Pod", space_type=LibrarySpace.POD, capacity=2)
+        date = (timezone.localdate() + timedelta(days=1)).isoformat()
+        booking = owner.post("/api/spaces/book/", {"space_id": str(pod.pk), "booking_date": date, "start_time": "10:00", "end_time": "11:00", "attendees_count": 1, "purpose": "Personal study notes"})
+        self.assertEqual(booking.status_code, 201)
+        schedule = viewer.get("/api/spaces/", {"date": date}).json()["results"][0]
+        self.assertEqual(set(schedule["bookings"][0]), {"start_time", "end_time", "status"})
+        staff = self.staff_client.get("/api/spaces/", {"date": date}).json()["results"][0]
+        self.assertEqual(staff["bookings"][0]["student_email"], member.email)
+
+    def test_student_picker_includes_members_beyond_old_200_limit(self):
+        Member.objects.bulk_create([Member(student_id=f"STU-PICKER-{index:04}", name=f"Reader {index}", email=f"picker{index}@campus.edu", course="CSE", year=1) for index in range(201)])
+        response = self.staff_client.get("/api/members/catalogue/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()["results"]), 201)
+
+    def test_chat_parses_json_and_serialized_histories_and_rejects_bad_payloads(self):
+        import json
+        from unittest.mock import patch
+        history = [{"role": "model", "text": "Hello"}, {"role": "user", "text": "How do I book a pod?"}]
+        with patch("library.gemini_service.call_gemini", return_value="Booking guide") as service:
+            form = self.client.post("/api/chat/", {"messages": json.dumps(history)})
+            self.assertEqual(form.status_code, 200)
+            self.assertEqual(service.call_args.args[0], history)
+            body = self.client.post("/api/chat/", data=json.dumps({"messages": history}), content_type="application/json")
+            self.assertEqual(body.status_code, 200)
+            self.assertEqual(service.call_args.args[0], history)
+            for invalid in [[], {"messages": [42]}, {"messages": [{"text": 10}]}, {"messages": [{"role": "admin", "text": "Hi"}]}, {"messages": [{"role": "user", "text": ""}]}]:
+                self.assertEqual(self.client.post("/api/chat/", data=json.dumps(invalid), content_type="application/json").status_code, 400)
+            self.assertEqual(self.client.post("/api/chat/", data="{bad", content_type="application/json").status_code, 400)
+
+    def test_chat_prioritizes_instructions_and_personal_data_and_legacy_fines(self):
+        from library.gemini_service import smart_local_response
+        member, student = self.make_student("CHATFINE")
+        FineEntry.objects.create(member=None, member_name=member.name, student_id=member.student_id,
+            amount=25, fine_type=FineEntry.CUSTOM, reason="Legacy fine")
+        for question in ["How to book a conference room?", "How do I book a conference room?", "How can I book a pod?"]:
+            guide = smart_local_response(question)
+            self.assertIn("Submit Request", guide)
+            self.assertIn("2-hour maximum", guide)
+        personal = smart_local_response("my pod bookings and my fines", student_member=member)
+        self.assertIn(member.student_id, personal)
+        self.assertIn("₹25", personal)
+        staff = self.staff_client.get("/api/members/").json()["results"]
+        row = next(item for item in staff if item["id"] == str(member.pk))
+        self.assertEqual(float(row["fine_balance"]), 25)
+        self.assertEqual(len(student.get("/api/fines/").json()["results"]), 1)
+
+    def test_invalid_book_copy_lookup_returns_json_not_success(self):
+        for identifier in ["not-an-id", "000000000000000000000000"]:
+            result = self.staff_client.get(f"/api/books/{identifier}/copies/")
+            self.assertEqual(result.status_code, 404)
+            self.assertEqual(result.json()["error"], "Book not found.")
+
+    def test_booking_dates_are_normalized_and_past_slots_cannot_be_booked_or_approved(self):
+        from unittest.mock import patch
+        member, student = self.make_student("BOOKCLOCK")
+        pod = LibrarySpace.objects.create(name="Clock Pod", space_type=LibrarySpace.POD, capacity=2)
+        values = {"space_id": str(pod.pk), "booking_date": "2030-1-2", "start_time": "10:00", "end_time": "11:00", "attendees_count": 1}
+        accepted = student.post("/api/spaces/book/", values)
+        self.assertEqual(accepted.status_code, 201)
+        self.assertEqual(accepted.json()["booking"]["booking_date"], "2030-01-02")
+        self.assertEqual(student.post("/api/spaces/book/", {**values, "booking_date": "2030-01-02"}).status_code, 400)
+        schedule = student.get("/api/spaces/?date=2030-1-2").json()
+        self.assertEqual(schedule["date"], "2030-01-02")
+        self.assertEqual(student.get("/api/spaces/?date=not-a-date").status_code, 400)
+        now = timezone.make_aware(datetime(2030, 1, 3, 11, 30))
+        with patch("library.api.timezone.localtime", return_value=now):
+            past = student.post("/api/spaces/book/", {**values, "booking_date": "2030-01-03"})
+            self.assertEqual(past.status_code, 400)
+            approval = self.staff_client.post(f"/api/librarian/space-bookings/{accepted.json()['booking']['id']}/approve/")
+            self.assertEqual(approval.status_code, 400)
+            today = student.get("/api/spaces/?date=2030-01-03").json()["results"][0]
+            self.assertFalse(next(slot for slot in today["schedule"] if slot["start"] == "10:00")["bookable"])
+            self.assertTrue(next(slot for slot in today["schedule"] if slot["start"] == "12:00")["bookable"])
+
+    def test_portal_workflows_with_production_style_mongo_validators(self):
+        from copy import deepcopy
+        from importlib import import_module
+        from types import SimpleNamespace
+        from django.db import connection
+        db = connection.database
+        validators = {
+            "books": {"bsonType": "object", "required": ["title", "author", "category", "copies", "available"], "properties": {"title": {"bsonType": "string", "minLength": 1}, "isbn": {"bsonType": ["string", "null"]}, "copies": {"bsonType": ["int", "long"], "minimum": 0}}},
+            "members": {"bsonType": "object", "required": ["name", "email", "course", "year"], "properties": {"student_id": {"bsonType": "string", "minLength": 8, "maxLength": 32}, "year": {"bsonType": ["int", "long"], "minimum": 1, "maximum": 6}, "password_hash": {"bsonType": "string", "minLength": 1}}},
+            "book_copies": {"bsonType": "object", "required": ["copy_id", "book_id", "book_title", "status", "created_at"], "properties": {"copy_id": {"bsonType": "string", "minLength": 8}, "book_id": {"bsonType": "objectId"}, "status": {"enum": ["available", "borrowed"]}, "created_at": {"bsonType": "date"}}},
+            "borrowings": {"bsonType": "object", "required": ["book_id", "book_title", "member_id", "member_name", "status", "borrowed_at", "due_at", "issue_code"], "properties": {"book_id": {"bsonType": ["objectId", "null"]}, "member_id": {"bsonType": ["objectId", "null"]}, "status": {"enum": ["borrowed", "returned"]}, "due_at": {"bsonType": "date"}}},
+            "reviews": {"bsonType": "object", "required": ["book_id", "book_title", "member_id", "member_name", "rating", "comment"], "properties": {"rating": {"bsonType": ["int", "long"], "minimum": 1, "maximum": 5}, "comment": {"bsonType": "string", "minLength": 0}}},
+        }
+        original = {name: deepcopy(db[name].options().get("validator", {})) for name in validators}
+        try:
+            for name, schema in validators.items():
+                db.command("collMod", name, validator={"$jsonSchema": schema})
+            migrate = import_module("library.migrations.0010_align_copy_status_and_review_comment").allow_retired_copies
+            migrate(None, SimpleNamespace(connection=connection))
+            migrate(None, SimpleNamespace(connection=connection))
+            self.assertEqual(db["book_copies"].options()["validator"]["$jsonSchema"]["properties"]["status"]["enum"], ["available", "borrowed", "retired"])
+            signup_client = Client()
+            signup = signup_client.post("/api/signup/", {"name": "Production Reader", "email": "production@campus.edu", "registration_number": "PROD-001", "course": "CSE", "year": 2, "password": "ProductionPass123!", "confirm_password": "ProductionPass123!"})
+            self.assertEqual(signup.status_code, 201)
+            values = {"title": "Production Book", "author": "A. Writer", "category": "Fiction", "copies": 2, "shelf": "P-01"}
+            created = self.staff_client.post("/api/books/", values)
+            self.assertEqual(created.status_code, 201)
+            book_id = created.json()["book"]["id"]
+            copy = BookCopy.objects.filter(book_id=book_id).first()
+            issued = signup_client.post("/api/student/issue/", {"copy_id": copy.copy_id})
+            self.assertEqual(issued.status_code, 201)
+            loan = Borrowing.objects.get(copy_id=copy.copy_id)
+            loan.due_at = timezone.now() - timedelta(days=2)
+            loan.save(update_fields=["due_at"])
+            self.assertEqual(self.staff_client.post("/api/returns/copy/", {"copy_id": copy.copy_id}).status_code, 200)
+            fine = FineEntry.objects.get(borrowing=loan)
+            self.assertEqual(self.staff_client.post(f"/api/fines/{fine.pk}/paid/").status_code, 200)
+            fine.refresh_from_db(); paid_at = fine.paid_at
+            self.assertEqual(self.staff_client.post(f"/api/fines/{fine.pk}/paid/").status_code, 200)
+            fine.refresh_from_db(); self.assertEqual(fine.paid_at, paid_at)
+            self.assertEqual(signup_client.post("/api/student/reviews/", {"book_id": book_id, "rating": 5}).status_code, 201)
+            reduced = self.staff_client.post(f"/api/books/{book_id}/", {**values, "copies": 1})
+            self.assertEqual(reduced.status_code, 200)
+            self.assertEqual(reduced.json()["book"]["total"], 1)
+            self.assertEqual(BookCopy.objects.filter(book_id=book_id, status=BookCopy.RETIRED).count(), 1)
+        finally:
+            for name, validator in original.items():
+                db.command("collMod", name, validator=validator)
+
     def test_rating_only_submission_with_legacy_mongo_validator(self):
         from copy import deepcopy
         from importlib import import_module
