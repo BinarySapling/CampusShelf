@@ -175,6 +175,8 @@ export default function Chatbot({ user }) {
 
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+  const launcherRef = useRef(null);
+  const wasOpenRef = useRef(false);
 
   useEffect(() => {
     if (isOpen && messagesEndRef.current) {
@@ -186,6 +188,25 @@ export default function Chatbot({ user }) {
     if (isOpen && inputRef.current) {
       inputRef.current.focus();
     }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (isOpen) {
+      wasOpenRef.current = true;
+      const closeOnEscape = (event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setIsOpen(false);
+        }
+      };
+      document.addEventListener("keydown", closeOnEscape);
+      return () => document.removeEventListener("keydown", closeOnEscape);
+    }
+    if (wasOpenRef.current) {
+      wasOpenRef.current = false;
+      launcherRef.current?.focus();
+    }
+    return undefined;
   }, [isOpen]);
 
   async function handleSend(textToSend) {
@@ -244,8 +265,11 @@ export default function Chatbot({ user }) {
         <button
           type="button"
           className="cs-chatbot-launcher"
+          ref={launcherRef}
           onClick={() => setIsOpen(true)}
           aria-label="Open Library Help Chatbot"
+          aria-controls="campusshelf-chat-dialog"
+          aria-expanded={isOpen}
           title="Open Library Assistant"
         >
           <span className="cs-launcher-icon-wrapper">
@@ -258,7 +282,7 @@ export default function Chatbot({ user }) {
 
       {/* Floating Chat Window */}
       {isOpen && (
-        <div className="cs-chatbot-window">
+        <section className="cs-chatbot-window" id="campusshelf-chat-dialog" role="dialog" aria-modal="false" aria-labelledby="cs-chat-title">
           {/* Header */}
           <div className="cs-chatbot-header">
             <div className="cs-chat-header-info">
@@ -267,8 +291,8 @@ export default function Chatbot({ user }) {
               </div>
               <div>
                 <div className="cs-chat-header-title">
-                  <span>CampusShelf AI</span>
-                  <span className="cs-chat-status-pill">Online</span>
+                  <span id="cs-chat-title">CampusShelf AI</span>
+                  <span className="cs-chat-status-pill" aria-label="Assistant is available">Online</span>
                 </div>
                 <div className="cs-chat-header-subtitle">
                   Gemini Library Assistant
@@ -281,6 +305,7 @@ export default function Chatbot({ user }) {
                 type="button"
                 className="cs-chat-icon-btn"
                 title="Clear chat history"
+                aria-label="Clear chat history"
                 onClick={clearHistory}
               >
                 <TrashIcon />
@@ -289,6 +314,7 @@ export default function Chatbot({ user }) {
                 type="button"
                 className="cs-chat-icon-btn"
                 title="Minimize chat"
+                aria-label="Minimize chat"
                 onClick={() => setIsOpen(false)}
               >
                 <MinimizeIcon />
@@ -297,6 +323,7 @@ export default function Chatbot({ user }) {
                 type="button"
                 className="cs-chat-icon-btn"
                 title="Close chat"
+                aria-label="Close chat"
                 onClick={() => setIsOpen(false)}
               >
                 <CloseIcon />
@@ -305,7 +332,7 @@ export default function Chatbot({ user }) {
           </div>
 
           {/* Quick Prompt Suggestions */}
-          <div className="cs-chatbot-suggestions">
+          <div className="cs-chatbot-suggestions" role="group" aria-label="Suggested questions">
             {DEFAULT_SUGGESTIONS.map((s, idx) => (
               <button
                 key={idx}
@@ -320,7 +347,7 @@ export default function Chatbot({ user }) {
           </div>
 
           {/* Message List */}
-          <div className="cs-chatbot-messages">
+          <div className="cs-chatbot-messages" role="log" aria-label="Conversation with the library assistant" aria-live="polite" aria-relevant="additions" aria-busy={loading}>
             {messages.map((m, idx) => (
               <div
                 key={idx}
@@ -347,6 +374,7 @@ export default function Chatbot({ user }) {
                   <ChatLogoIcon size={14} />
                 </div>
                 <div className="cs-message-bubble bot-bubble typing">
+                  <span className="sr-only">The library assistant is responding.</span>
                   <span className="typing-dot" />
                   <span className="typing-dot" />
                   <span className="typing-dot" />
@@ -367,6 +395,7 @@ export default function Chatbot({ user }) {
             <input
               ref={inputRef}
               type="text"
+              aria-label="Message the library assistant"
               placeholder="Ask about slots, rooms, book recommendations..."
               value={input}
               disabled={loading}
@@ -378,11 +407,12 @@ export default function Chatbot({ user }) {
               className="cs-chat-send-btn"
               disabled={loading || !input.trim()}
               title="Send message"
+              aria-label="Send message"
             >
               <SendIcon />
             </button>
           </form>
-        </div>
+        </section>
       )}
     </div>
   );

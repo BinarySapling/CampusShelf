@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { api, formBody } from "./api.js";
 import Scanner from "./Scanner.jsx";
@@ -44,6 +44,10 @@ const noticeTimers = new WeakMap();
 function noticeText(setNotice, text, kind = "success") {
   window.clearTimeout(noticeTimers.get(setNotice));
   setNotice({ text, kind });
+  if (kind === "error") {
+    noticeTimers.delete(setNotice);
+    return;
+  }
   noticeTimers.set(setNotice, window.setTimeout(() => { setNotice(null); noticeTimers.delete(setNotice); }, 4500));
 }
 
@@ -54,7 +58,7 @@ function StatCard({ label, value, note }) {
 function BookRating({ rating = 0, count = 0 }) {
   const average = Number(rating) || 0;
   const label = count ? `${average.toFixed(1)} out of 5 from ${count} reader rating${count === 1 ? "" : "s"}` : "No reader ratings yet";
-  return <span className="book-rating" aria-label={label}>
+  return <span className="book-rating" role="img" aria-label={label}>
     <span className="book-rating-stars" aria-hidden="true">{[1, 2, 3, 4, 5].map((star) => <span key={star} className={star <= Math.round(average) ? "is-rated" : ""}>★</span>)}</span>
     <small>{count ? `${average.toFixed(1)} · ${count} ${count === 1 ? "rating" : "ratings"}` : "No ratings yet"}</small>
   </span>;
@@ -62,6 +66,66 @@ function BookRating({ rating = 0, count = 0 }) {
 
 function PageTitle({ eyebrow, title, note, action }) {
   return <div className="page-title"><div><span className="eyebrow">{eyebrow}</span><h2>{title}</h2>{note && <p>{note}</p>}</div>{action}</div>;
+}
+
+function LoadError({ message, onRetry }) {
+  return <div className="route-load-error" role="group" aria-label="Page loading error">
+    <div role="alert" aria-live="assertive"><strong>This page could not load.</strong><p>{message || "Check your connection and try again."}</p></div>
+    <button className="button light small" type="button" onClick={onRetry}>Try again</button>
+  </div>;
+}
+
+function LoadingState({ label }) {
+  return <p className="route-loading" role="status" aria-live="polite">{label}</p>;
+}
+
+function useAccessibleDialog(open, dialogRef, onClose) {
+  const onCloseRef = useRef(onClose);
+  const openRef = useRef(open);
+  onCloseRef.current = onClose;
+  openRef.current = open;
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const dialog = dialogRef.current;
+    const previousFocus = document.activeElement;
+    const focusableSelector = "a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])";
+    const getFocusable = () => [...(dialog?.querySelectorAll(focusableSelector) || [])].filter((element) => element.getClientRects().length);
+    const focusable = getFocusable();
+    (focusable[0] || dialog)?.focus({ preventScroll: true });
+
+    function handleKeys(event) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCloseRef.current?.();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const current = getFocusable();
+      if (!current.length) {
+        event.preventDefault();
+        dialog?.focus();
+        return;
+      }
+      const first = current[0];
+      const last = current[current.length - 1];
+      if (event.shiftKey && (document.activeElement === first || !dialog?.contains(document.activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !dialog?.contains(document.activeElement))) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener("keydown", handleKeys);
+    return () => {
+      document.removeEventListener("keydown", handleKeys);
+      if (previousFocus?.isConnected) window.requestAnimationFrame(() => {
+        if (!openRef.current) previousFocus.focus?.();
+      });
+    };
+  }, [open, dialogRef]);
 }
 
 function NavIcon({ name }) {
@@ -105,14 +169,16 @@ function AuthScreen({ onLogin, onSetup, onSignup, setupAvailable }) {
   }
 
   return (
-    <main className="auth-page">
+    <>
+    <a className="skip-link" href="#auth-main">Skip to sign in</a>
+    <main className="auth-page" id="auth-main" tabIndex={-1} aria-labelledby="auth-heading">
       <section className="auth-card">
         <div className="auth-brand"><img src="/assets/campusshelf-logo.svg" alt="" /><div><b>CampusShelf</b><small>READ. CONNECT. DISCOVER.</small></div></div>
         <span className="eyebrow">YOUR NEXT CHAPTER STARTS HERE</span>
-        <h1>{mode === "signup" ? "Create student account" : mode === "setup" ? "Set up the library desk" : "Welcome back"}</h1>
+        <h1 id="auth-heading">{mode === "signup" ? "Create student account" : mode === "setup" ? "Set up the library desk" : "Welcome back"}</h1>
         <p className="muted">{mode === "signup" ? "Enter your campus details to create your library account immediately." : mode === "setup" ? "Create the first librarian account to get started." : "Sign in using your student ID, librarian ID, or email."}</p>
-        {error && <div className="notice error">{error}</div>}
-        <form className="stack-form" onSubmit={submit}>
+        {error && <div className="notice error" id="auth-error" role="alert" aria-live="assertive">{error}</div>}
+        <form className="stack-form" onSubmit={submit} aria-busy={busy} aria-describedby={error ? "auth-error" : undefined}>
           {mode === "signup" && <>
             <label>Full name<input name="name" required maxLength="100" autoComplete="name" placeholder="e.g. Aarav Sharma" /></label>
             <label>Campus email<input name="email" type="email" required maxLength="160" autoComplete="email" placeholder="e.g. student@campus.edu" /></label>
@@ -144,25 +210,32 @@ function AuthScreen({ onLogin, onSetup, onSignup, setupAvailable }) {
       </section>
       <aside className="auth-art"><div className="art-caption"><span className="edition-number">01 / THE CAMPUS COLLECTION</span><Sparkles size={20} aria-hidden="true" /></div><LibraryArt /><div><span className="eyebrow">A PLACE FOR THE NEXT CHAPTER</span><h2>A little curiosity. A whole new chapter.</h2><p>Your campus collection, ready when you are.</p></div></aside>
     </main>
+    </>
   );
 }
 
 function Dashboard({ setNotice, onNavigate }) {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    api("/dashboard/")
-      .then(setStats)
-      .catch((error) => noticeText(setNotice, error.message, "error"))
-      .finally(() => setLoading(false));
+  const [loadError, setLoadError] = useState("");
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError("");
+    try { setStats(await api("/dashboard/")); }
+    catch (error) { setLoadError(error.message); }
+    finally { setLoading(false); }
   }, []);
+  useEffect(() => { load(); }, [load]);
   return <>
     <section className="dashboard-hero">
+      <div className="dashboard-hero-art" aria-hidden="true"><img src="/assets/library-dashboard-scene.jpg" alt="" fetchPriority="high" /></div>
       <div className="dashboard-hero-copy"><span className="eyebrow">THE LIBRARY DESK</span><h2>Make room for the next great read.</h2><p>One place to care for the collection, keep circulation moving, and welcome new readers.</p><button className="button hero-action" onClick={() => onNavigate("loans")}>Open circulation <span aria-hidden="true">↗</span></button></div>
       <div className="dashboard-stamp" aria-hidden="true"><span>READ</span><b>CS</b><span>RETURN · REPEAT</span></div>
     </section>
     <div className="dashboard-intro"><div><span className="eyebrow">TODAY AT THE LIBRARY</span><h2>Here is what is happening.</h2></div><span className="dashboard-date">Your library, at a glance</span></div>
-    <div className="stats-grid">
+    {loadError && <LoadError message={loadError} onRetry={load} />}
+    {loading && !stats && <LoadingState label="Loading library overview…" />}
+    <div className="stats-grid" aria-busy={loading}>
       <StatCard label="Titles" value={loading ? "…" : stats?.books} note="In the catalogue" />
       <StatCard label="Physical copies" value={loading ? "…" : stats?.copies} note="Each one has a QR label" />
       <StatCard label="Students" value={loading ? "…" : stats?.members} note="Approved portal accounts" />
@@ -179,16 +252,22 @@ function CatalogueTile({ book, onOpen }) {
   return <button type="button" className="catalogue-card book-tile" onClick={() => onOpen(book)}><BookCover book={book} /><span className="eyebrow">{book.category}</span><h3>{book.title}</h3><p>{book.author}</p><BookRating rating={book.average_rating} count={book.rating_count} /><div className="catalogue-footer"><span>{book.available_to_borrow} / {book.total} copies free</span><small>Shelf {book.shelf || "Unassigned"}</small></div><span className="book-tile-link">View title <span aria-hidden="true">↗</span></span></button>;
 }
 
-function BooksPage({ setNotice, onAddBook, onOpenBook }) {
+function BooksPage({ onAddBook, onOpenBook }) {
   const [copies, setCopies] = useState(null);
+  const [copiesLoading, setCopiesLoading] = useState(false);
+  const [copiesError, setCopiesError] = useState("");
   async function showAllCopies() {
+    setCopiesLoading(true);
+    setCopiesError("");
     try { const result = await api("/books/copies/"); setCopies(result.results); }
-    catch (error) { noticeText(setNotice, error.message, "error"); }
+    catch (error) { setCopiesError(error.message); }
+    finally { setCopiesLoading(false); }
   }
   return <>
     <PageTitle eyebrow="COLLECTION / SEARCH" title="Find a title" note="Search, combine filters, and open a title to explore its copies." action={<button className="button primary" onClick={onAddBook}>＋ Add a book</button>} />
-    <CatalogueExplorer path="/books/" renderBook={(book) => <CatalogueTile key={book.id} book={book} onOpen={onOpenBook} />} action={<button className="button light small" type="button" onClick={showAllCopies}>Choose QR labels to print</button>} />
-    {copies && <CopyLabels copies={copies} title="All book copies" />}
+    <CatalogueExplorer path="/books/" renderBook={(book) => <CatalogueTile key={book.id} book={book} onOpen={onOpenBook} />} action={<button className="button light small" type="button" disabled={copiesLoading} onClick={showAllCopies}>{copiesLoading ? "Loading labels…" : "Choose QR labels to print"}</button>} />
+    {copiesError && <LoadError message={copiesError} onRetry={showAllCopies} />}
+    {copies && <CopyLabels copies={copies} title="All book copies" loading={copiesLoading} error={Boolean(copiesError)} />}
   </>;
 }
 
@@ -231,16 +310,19 @@ function AddBookPage({ setNotice, onSaved, onCancel, book = null }) {
   </>;
 }
 
-function BookDetailPage({ book, setNotice, onBack, onEdit }) {
+function BookDetailPage({ book, onBack, onEdit }) {
   const [copies, setCopies] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
 
-  useEffect(() => {
-    api(`/books/${book.id}/copies/`)
-      .then((data) => setCopies(data.results))
-      .catch((error) => noticeText(setNotice, error.message, "error"))
-      .finally(() => setLoading(false));
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError("");
+    try { setCopies((await api(`/books/${book.id}/copies/`)).results); }
+    catch (error) { setLoadError(error.message); }
+    finally { setLoading(false); }
   }, [book.id]);
+  useEffect(() => { load(); }, [load]);
 
   const availableCount = copies.filter((copy) => copy.status === "available").length;
   const shelfLocations = [...new Set(copies.map((copy) => copy.shelf).filter(Boolean))];
@@ -249,7 +331,9 @@ function BookDetailPage({ book, setNotice, onBack, onEdit }) {
   return <>
     <PageTitle eyebrow="BOOK DETAILS / PHYSICAL COPIES" title={book.title} note={`${book.author} · ${book.category}`} action={<div className="page-title-actions"><button className="button light" onClick={onBack}>← Back to titles</button><button className="button primary" onClick={() => onEdit(book)}>Edit details</button></div>} />
     <section className="book-detail-hero"><div className="detail-cover-wrap"><BookCover book={book} /></div><div><span className="eyebrow">{book.category}</span><h3>{book.title}</h3><p>{book.description || "A title in the CampusShelf collection."}</p><div className="detail-stats"><span><b>{book.total}</b> physical copies</span><span><b>{availableCount}</b> free to borrow</span><span><b>{copies.length - availableCount}</b> on loan</span><span><b>{shelfLocations.length > 1 ? "Shelves" : "Shelf"} {shelfLabel}</b></span></div></div></section>
-    <CopyLabels copies={copies} title={book.title} loading={loading} />
+    {loadError && <LoadError message={loadError} onRetry={load} />}
+    {loading && <LoadingState label="Loading copy records…" />}
+    <CopyLabels copies={copies} title={book.title} loading={loading} error={Boolean(loadError)} />
   </>;
 }
 
@@ -257,12 +341,15 @@ function RequestsPage({ setNotice }) {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [reviewingId, setReviewingId] = useState("");
-  async function load() {
+  const [loadError, setLoadError] = useState("");
+  const load = useCallback(async () => {
     setLoading(true);
+    setLoadError("");
     try { setRequests((await api("/requests/")).results); }
+    catch (error) { setLoadError(error.message); }
     finally { setLoading(false); }
-  }
-  useEffect(() => { load().catch((error) => noticeText(setNotice, error.message, "error")); }, []);
+  }, []);
+  useEffect(() => { load(); }, [load]);
 
   async function review(item, action) {
     setReviewingId(item.id);
@@ -279,26 +366,37 @@ function RequestsPage({ setNotice }) {
 
   return <>
     <PageTitle eyebrow="STUDENT ACCESS / REVIEW" title="Signup requests" note="Verify the campus email and registration number before approving portal access." />
+    {loadError && <LoadError message={loadError} onRetry={load} />}
     <section className="panel"><div className="panel-head"><div><span className="eyebrow">APPLICATIONS</span><h3>Waiting for a librarian</h3></div><span className="pill">{requests.filter((item) => item.status === "pending").length} pending</span></div>
-      <div className="request-list">{requests.map((item) => <article className="request-row" key={item.id}><div className="request-avatar">{item.name.slice(0, 1).toUpperCase()}</div><div className="request-info"><b>{item.name}</b><span>{item.email}</span><small>Registration {item.registration_number} · {item.course} · Year {item.year}</small></div><span className={`status ${item.status}`}>{item.status}</span>{item.status === "pending" && <div className="row-actions"><button className="button primary small" disabled={Boolean(reviewingId)} onClick={() => review(item, "approve")}>{reviewingId === item.id ? "Saving…" : "Approve"}</button><button className="button danger small" disabled={Boolean(reviewingId)} onClick={() => review(item, "reject")}>Reject</button></div>}</article>)}{loading && <p className="empty">Loading signup requests…</p>}{!loading && requests.length === 0 && <p className="empty">No signup requests yet.</p>}</div>
+      <div className="request-list" aria-busy={loading}>{requests.map((item) => <article className="request-row" key={item.id}><div className="request-avatar" aria-hidden="true">{item.name.slice(0, 1).toUpperCase()}</div><div className="request-info"><b>{item.name}</b><span>{item.email}</span><small>Registration {item.registration_number} · {item.course} · Year {item.year}</small></div><span className={`status ${item.status}`}>{item.status}</span>{item.status === "pending" && <div className="row-actions"><button className="button primary small" disabled={Boolean(reviewingId)} onClick={() => review(item, "approve")}>{reviewingId === item.id ? "Saving…" : "Approve"}</button><button className="button danger small" disabled={Boolean(reviewingId)} onClick={() => review(item, "reject")}>Reject</button></div>}</article>)}{loading && <LoadingState label="Loading signup requests…" />}{!loading && !loadError && requests.length === 0 && <p className="empty" role="status">No signup requests yet.</p>}</div>
     </section>
   </>;
 }
 
-function StudentsPage({ setNotice, onAddFine }) {
+function StudentsPage({ onAddFine }) {
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [query, setQuery] = useState("");
   const [choices, setChoices] = useState({});
-  useEffect(() => { api("/members/").then((data) => setMembers(data.results)).catch((error) => noticeText(setNotice, error.message, "error")).finally(() => setLoading(false)); }, []);
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError("");
+    try { setMembers((await api("/members/")).results); }
+    catch (error) { setLoadError(error.message); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
   const visible = filterRows(members.map((member) => ({ ...member, portal_state: member.portal_ready ? "ready" : "pending" })), query, choices);
   const courses = [...new Set(members.map((member) => member.course))].filter(Boolean).sort();
   return <>
     <PageTitle eyebrow="DIRECTORY / PORTAL ACCESS" title="Students" note="Find a student, check account details, or add a fine directly." />
+    {loadError && <LoadError message={loadError} onRetry={load} />}
     <section className="panel"><div className="panel-head"><div><span className="eyebrow">APPROVED MEMBERS</span><h3>Campus readers</h3></div><span className="pill">{members.length} students</span></div>
       <RecordFilters query={query} onQuery={setQuery} choices={choices} onChoices={setChoices} count={visible.length} loading={loading} label="Search name, student ID, email, or course" groups={[{ key: "course", label: "Course", options: courses.map((value) => ({ value, label: value })) }, { key: "year", label: "Year", options: [...new Set(members.map((member) => String(member.year)))].sort().map((value) => ({ value, label: `Year ${value}` })) }, { key: "portal_state", label: "Portal access", options: [{ value: "ready", label: "Ready" }, { value: "pending", label: "Password needed" }] }]} />
       <div className="table-scroll"><table><thead><tr><th>Student</th><th>Student ID</th><th>Course</th><th>Portal</th><th>Fine balance</th><th>Actions</th></tr></thead><tbody>{visible.map((member) => <tr key={member.id}><td><b>{member.name}</b><small>{member.email}</small></td><td><code>{member.student_id}</code></td><td>{member.course} · Year {member.year}</td><td><span className={`status ${member.portal_ready ? "approved" : "pending"}`}>{member.portal_ready ? "Ready" : "Password needed"}</span></td><td>₹{member.fine_balance}</td><td><button className="button danger small" onClick={() => onAddFine(member)} aria-label={`Add fine for ${member.name}`}>Add fine</button></td></tr>)}</tbody></table></div>
-      {!loading && !visible.length && <p className="empty">No students match. Clear your search or try fewer filters.</p>}
+      {loading && <LoadingState label="Loading student directory…" />}
+      {!loading && !loadError && !visible.length && <p className="empty" role="status">No students match. Clear your search or try fewer filters.</p>}
     </section>
   </>;
 }
@@ -307,6 +405,7 @@ function LoansPage({ setNotice }) {
   const [loans, setLoans] = useState([]);
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState("return");
   const [copyId, setCopyId] = useState("");
@@ -314,17 +413,20 @@ function LoansPage({ setNotice }) {
   const [scanOpen, setScanOpen] = useState(false);
   const [scanInfo, setScanInfo] = useState(null);
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
+    setLoadError("");
     try {
       const [loanData, memberData] = await Promise.all([api("/loans/"), api("/members/catalogue/")]);
       setLoans(loanData.results);
       setMembers(memberData.results);
+    } catch (error) {
+      setLoadError(error.message);
     } finally {
       setLoading(false);
     }
-  }
-  useEffect(() => { load().catch((error) => noticeText(setNotice, error.message, "error")); }, []);
+  }, []);
+  useEffect(() => { load(); }, [load]);
 
   async function scanned(value) {
     setScanOpen(false);
@@ -370,9 +472,10 @@ function LoansPage({ setNotice }) {
 
   return <>
     <PageTitle eyebrow="CIRCULATION DESK / COPY QR" title="Issue and return books" note="Scan a copy label or type its Copy ID. A QR never approves a loan by itself." />
+    {loadError && <LoadError message={loadError} onRetry={load} />}
     <section className="panel action-panel"><div className="mode-switch"><button className={mode === "return" ? "selected" : ""} onClick={() => { setMode("return"); setScanInfo(null); }}>Return a copy</button><button className={mode === "issue" ? "selected" : ""} onClick={() => { setMode("issue"); setScanInfo(null); }}>Issue to student</button></div>
       <form className="issue-controls" onSubmit={submit}>
-        {mode === "issue" && <SearchPicker label="Approved student" value={memberId} onChange={setMemberId} required options={members.map((member) => ({ value: member.id, label: member.name, detail: `${member.student_id} · ${member.email || member.course || ""}` }))} placeholder="Search student name or ID…" />}
+        {mode === "issue" && <SearchPicker label="Approved student" value={memberId} onChange={setMemberId} required loading={loading} options={members.map((member) => ({ value: member.id, label: member.name, detail: `${member.student_id} · ${member.email || member.course || ""}` }))} placeholder="Search student name or ID…" />}
         <label>Physical Copy ID<input value={copyId} onChange={(event) => setCopyId(event.target.value.toUpperCase())} placeholder="Scan the QR or type CSB-…" required /></label>
         <div className="button-line"><button className="button light" type="button" onClick={() => setScanOpen((open) => !open)}>{scanOpen ? "Close scanner" : "Open camera scanner"}</button><button className="button primary" disabled={busy || scanInfo?.returned || (scanInfo && mode === "return" && !scanInfo.active_loan) || (scanInfo && mode === "issue" && scanInfo.status !== "available")}>{busy ? "Saving…" : mode === "issue" ? "Confirm issue" : scanInfo?.returned ? "Return recorded" : scanInfo?.active_loan ? "Complete this return" : "Complete return"}</button></div>
       </form>
@@ -380,7 +483,7 @@ function LoansPage({ setNotice }) {
       {scanInfo && <div className={`scan-result-card ${scanInfo.returned ? "complete" : ""}`} role="status"><span className="scan-result-mark" aria-hidden="true">{scanInfo.returned ? "✓" : "⌗"}</span><div><span className="eyebrow">{scanInfo.returned ? "RETURN RECORDED" : "COPY SCANNED"}</span><b>{scanInfo.book_title || "Physical copy"}</b><small>{scanInfo.copy_id}{scanInfo.member_name ? ` · With ${scanInfo.member_name}` : ""}{scanInfo.issue_code ? ` · ${scanInfo.issue_code}` : ""}</small><p>{scanInfo.returned ? "This copy is available to borrow again." : mode === "return" && scanInfo.active_loan ? "Active loan found. Complete the return to update the copy and its transaction." : scanInfo.status === "available" ? "Available to borrow. Select a student before issuing." : "No active loan was found for this copy. Review its transaction history before changing its status."}</p></div><span className={`status ${scanInfo.returned ? "available" : scanInfo.active_loan ? "borrowed" : scanInfo.status}`}>{scanInfo.returned ? "Available" : scanInfo.active_loan ? "On loan" : scanInfo.status}</span></div>}
     </section>
     <section className="panel"><div className="panel-head"><div><span className="eyebrow">COMPLETE HISTORY</span><h3>Transaction register</h3></div><span className="pill">{loans.length} records</span></div>
-      <div className="table-scroll"><table><thead><tr><th>Issue ID</th><th>Book / copy</th><th>Student</th><th>Due date</th><th>Current fine</th><th>Status</th></tr></thead><tbody>{loans.map((loan) => <tr key={loan.id}><td><code>{loan.issue_code}</code></td><td><b>{loan.book_title}</b><small>{loan.copy_id}</small></td><td>{loan.member_name}<small>{loan.student_id}</small></td><td>{new Date(loan.due_at).toLocaleDateString()}{["due_soon", "overdue"].includes(loan.due_status) && <small><span className={`status ${loan.due_status}`}>{loan.due_message}</span></small>}</td><td>{loan.current_fine === "0" ? "—" : `₹${loan.current_fine}`}</td><td><span className={`status ${loan.status}`}>{loan.status}</span></td></tr>)}</tbody></table></div>{loading && <p className="empty">Loading issue records…</p>}{!loading && loans.length === 0 && <p className="empty">No books have been issued yet.</p>}
+      <div className="table-scroll" aria-busy={loading}><table><thead><tr><th>Issue ID</th><th>Book / copy</th><th>Student</th><th>Due date</th><th>Current fine</th><th>Status</th></tr></thead><tbody>{loans.map((loan) => <tr key={loan.id}><td><code>{loan.issue_code}</code></td><td><b>{loan.book_title}</b><small>{loan.copy_id}</small></td><td>{loan.member_name}<small>{loan.student_id}</small></td><td>{new Date(loan.due_at).toLocaleDateString()}{["due_soon", "overdue"].includes(loan.due_status) && <small><span className={`status ${loan.due_status}`}>{loan.due_message}</span></small>}</td><td>{loan.current_fine === "0" ? "—" : `₹${loan.current_fine}`}</td><td><span className={`status ${loan.status}`}>{loan.status}</span></td></tr>)}</tbody></table>{loading && <LoadingState label="Loading issue records…" />}{!loading && !loadError && loans.length === 0 && <p className="empty" role="status">No books have been issued yet.</p>}</div>
     </section>
   </>;
 }
@@ -393,10 +496,12 @@ function TransactionsPage({ setNotice, student = false }) {
   const requestSequence = useRef(0);
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 });
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
 
   const load = useCallback(async (searchTerm, selectedType, pageNumber = 1) => {
     const sequence = ++requestSequence.current;
     setLoading(true);
+    setLoadError("");
     try {
       const params = new URLSearchParams({ q: searchTerm, page: String(pageNumber) });
       selectedType.forEach((value) => params.append("type", value));
@@ -406,12 +511,14 @@ function TransactionsPage({ setNotice, student = false }) {
       setAppliedQuery(searchTerm);
       setTransactions(result.results);
       setPagination(result.pagination);
+    } catch (error) {
+      if (sequence === requestSequence.current) setLoadError(error.message);
     } finally {
       if (sequence === requestSequence.current) setLoading(false);
     }
   }, [student]);
 
-  useEffect(() => { load("", [], 1).catch((error) => noticeText(setNotice, error.message, "error")); }, [load]);
+  useEffect(() => { load("", [], 1); }, [load]);
 
   function submit(event) {
     event.preventDefault();
@@ -423,6 +530,7 @@ function TransactionsPage({ setNotice, student = false }) {
 
   return <>
     <PageTitle eyebrow={student ? "STUDENT PORTAL / ACCOUNT HISTORY" : "LIBRARY DESK / AUDIT"} title={student ? "My activity" : "Transaction activity"} note={student ? "A timeline of your checkouts, returns, renewal decisions, and fines." : "Search circulation and account events across the library."} />
+    {loadError && <LoadError message={loadError} onRetry={() => load(query, type, pagination.page)} />}
     <section className="panel transaction-panel">
       <form className="transaction-filters" onSubmit={submit}>
         <label className="transaction-search">Search<input value={query} disabled={loading} onChange={(event) => setQuery(event.target.value)} placeholder={student ? "Title, issue ID, or fine reason" : "Student, title, Copy ID, or issue ID"} /></label>
@@ -431,11 +539,11 @@ function TransactionsPage({ setNotice, student = false }) {
       </form>
       <CheckboxGroup label="Activity types" options={Object.entries(labels).map(([value, label]) => ({ value, label }))} selected={type} disabled={loading} onChange={(values) => { setType(values); load(query, values, 1).catch((error) => noticeText(setNotice, error.message, "error")); }} />
       <ActiveFilters items={[...(appliedQuery ? [{ key: "query", label: `Search: ${appliedQuery}`, remove: () => { setQuery(""); load("", type, 1).catch((error) => noticeText(setNotice, error.message, "error")); } }] : []), ...type.map((value) => ({ key: value, label: labels[value], remove: () => { const values = type.filter((item) => item !== value); setType(values); load(query, values, 1).catch((error) => noticeText(setNotice, error.message, "error")); } }))]} onClear={() => { setQuery(""); setType([]); load("", [], 1).catch((error) => noticeText(setNotice, error.message, "error")); }} />
-      <div className="transaction-list">{transactions.map((item) => <article className="transaction-row" key={item.id}>
+      <div className="transaction-list" aria-busy={loading}>{transactions.map((item) => <article className="transaction-row" key={item.id}>
         <span className={`transaction-icon ${item.type}`} aria-hidden="true">{icons[item.type]}</span>
         <div className="transaction-copy"><div className="transaction-heading"><b>{item.title}</b><span className={`status ${item.status}`}>{labels[item.type]}</span></div><p>{item.details}</p>{!student && <small>{item.student_name} · {item.student_id}</small>}<time dateTime={item.occurred_at}>{new Date(item.occurred_at).toLocaleString()}</time></div>
         {item.amount && <strong className="transaction-amount">₹{Number(item.amount).toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</strong>}
-      </article>)}{loading && <p className="empty">Loading transaction history…</p>}{!loading && transactions.length === 0 && <p className="empty">No activity matches this search.</p>}</div>
+      </article>)}{loading && <LoadingState label="Loading transaction history…" />}{!loading && !loadError && transactions.length === 0 && <p className="empty" role="status">No activity matches this search.</p>}</div>
       <div className="pagination-controls"><span>{pagination.total} event{pagination.total === 1 ? "" : "s"} · Page {pagination.page} of {pagination.pages}</span><div><button className="button light small" disabled={loading || pagination.page <= 1} onClick={() => load(query, type, pagination.page - 1).catch((error) => noticeText(setNotice, error.message, "error"))}>← Previous</button><button className="button light small" disabled={loading || pagination.page >= pagination.pages} onClick={() => load(query, type, pagination.page + 1).catch((error) => noticeText(setNotice, error.message, "error"))}>Next →</button></div></div>
     </section>
   </>;
@@ -449,18 +557,22 @@ function FinesPage({ setNotice, initialMemberId = "" }) {
   const visibleFines = filterRows(fines, fineSearch, fineFilters);
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [busy, setBusy] = useState(false);
   async function load() {
     setLoading(true);
+    setLoadError("");
     try {
       const [fineData, memberData] = await Promise.all([api("/fines/"), api("/members/catalogue/")]);
       setFines(fineData.results);
       setMembers(memberData.results);
+    } catch (error) {
+      setLoadError(error.message);
     } finally {
       setLoading(false);
     }
   }
-  useEffect(() => { load().catch((error) => noticeText(setNotice, error.message, "error")); }, []);
+  useEffect(() => { load(); }, []);
 
   async function addFine(event) {
     event.preventDefault();
@@ -504,6 +616,7 @@ function FinesPage({ setNotice, initialMemberId = "" }) {
 
   return <>
     <PageTitle eyebrow="STUDENT ACCOUNTS / ₹20 PER DAY" title="Fine ledger" note="Current overdue amounts update by calendar day. Returned-book fines are saved as a fixed entry." />
+    {loadError && <LoadError message={loadError} onRetry={load} />}
     <div className="content-grid">
       <section className="panel"><div className="panel-head"><div><span className="eyebrow">LIBRARIAN ENTRY</span><h3>Add a custom fine</h3></div></div>
         <form className="stack-form compact" onSubmit={addFine}>
@@ -514,7 +627,7 @@ function FinesPage({ setNotice, initialMemberId = "" }) {
         </form>
       </section>
       <section className="panel list-panel"><div className="panel-head"><div><span className="eyebrow">ALL RECORDS</span><h3>Fines and payments</h3></div><span className="pill">{fines.length} entries</span></div>
-        <RecordFilters query={fineSearch} onQuery={setFineSearch} choices={fineFilters} onChoices={setFineFilters} count={visibleFines.length} loading={loading} label="Search student, ID, fine reason, or amount" groups={[{ key: "status", label: "Payment status", options: [{ value: "unpaid", label: "Unpaid" }, { value: "paid", label: "Paid" }] }, { key: "fine_type", label: "Fine type", options: [{ value: "custom", label: "Custom" }, { value: "overdue", label: "Overdue" }] }]} /><div className="fine-list">{visibleFines.map((fine) => <article className="fine-row" key={fine.id}><div className="fine-amount">₹{fine.amount}</div><div className="fine-info"><b>{fine.member_name} <small>{fine.student_id}</small></b><span>{fine.reason}</span><small>{fine.fine_type === "overdue" ? "Overdue fine" : "Custom fine"} · {new Date(fine.created_at).toLocaleDateString()}</small></div><span className={`status ${fine.status}`}>{fine.status}</span>{fine.status === "unpaid" && (fine.current ? <small className="fine-live-note">Return the book to finalise this amount, then mark it paid or remove it.</small> : <div className="fine-actions"><button className="button light small" disabled={busy} onClick={() => markPaid(fine)}>Mark paid</button><button className="button danger small" disabled={busy} onClick={() => removeFine(fine)}>Remove fine</button></div>)}</article>)}{loading && <p className="empty">Loading fines…</p>}{!loading && visibleFines.length === 0 && <p className="empty">No fines match. Try fewer filters or clear the search.</p>}</div>
+        <RecordFilters query={fineSearch} onQuery={setFineSearch} choices={fineFilters} onChoices={setFineFilters} count={visibleFines.length} loading={loading} label="Search student, ID, fine reason, or amount" groups={[{ key: "status", label: "Payment status", options: [{ value: "unpaid", label: "Unpaid" }, { value: "paid", label: "Paid" }] }, { key: "fine_type", label: "Fine type", options: [{ value: "custom", label: "Custom" }, { value: "overdue", label: "Overdue" }] }]} /><div className="fine-list" aria-busy={loading}>{visibleFines.map((fine) => <article className="fine-row" key={fine.id}><div className="fine-amount">₹{fine.amount}</div><div className="fine-info"><b>{fine.member_name} <small>{fine.student_id}</small></b><span>{fine.reason}</span><small>{fine.fine_type === "overdue" ? "Overdue fine" : "Custom fine"} · {new Date(fine.created_at).toLocaleDateString()}</small></div><span className={`status ${fine.status}`}>{fine.status}</span>{fine.status === "unpaid" && (fine.current ? <small className="fine-live-note">Return the book to finalise this amount, then mark it paid or remove it.</small> : <div className="fine-actions"><button className="button light small" disabled={busy} onClick={() => markPaid(fine)}>Mark paid</button><button className="button danger small" disabled={busy} onClick={() => removeFine(fine)}>Remove fine</button></div>)}</article>)}{loading && <LoadingState label="Loading fines…" />}{!loading && !loadError && visibleFines.length === 0 && <p className="empty" role="status">No fines match. Try fewer filters or clear the search.</p>}</div>
       </section>
     </div>
   </>;
@@ -567,19 +680,23 @@ function ReviewsPage({ setNotice }) {
   const [books, setBooks] = useState([]);
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [busy, setBusy] = useState(false);
   async function load() {
     setLoading(true);
+    setLoadError("");
     try {
       const [reviewData, bookData, memberData] = await Promise.all([api("/reviews/"), loadBookChoices(), api("/members/catalogue/")]);
       setReviews(reviewData.results);
       setBooks(bookData.results);
       setMembers(memberData.results);
+    } catch (error) {
+      setLoadError(error.message);
     } finally {
       setLoading(false);
     }
   }
-  useEffect(() => { load().catch((error) => noticeText(setNotice, error.message, "error")); }, []);
+  useEffect(() => { load(); }, []);
   async function submit(event) {
     event.preventDefault();
     const form = event.currentTarget;
@@ -597,6 +714,7 @@ function ReviewsPage({ setNotice }) {
   }
   return <>
     <PageTitle eyebrow="READER NOTES / COMMUNITY" title="Reviews" note="Keep the thoughtful notes readers want to pass along." />
+    {loadError && <LoadError message={loadError} onRetry={load} />}
     <div className="content-grid">
       <section className="panel"><div className="panel-head"><div><span className="eyebrow">SHARE A THOUGHT</span><h3>Write a review</h3></div></div>
         <form className="stack-form compact" onSubmit={submit}>
@@ -607,7 +725,7 @@ function ReviewsPage({ setNotice }) {
           <button className="button primary" disabled={busy}>{busy ? "Saving…" : "Save review"}</button>
         </form>
       </section>
-      <section className="panel list-panel"><div className="panel-head"><div><span className="eyebrow">WORDS WORTH KEEPING</span><h3>Community notes</h3></div></div><div className="review-list">{reviews.map((review) => <article className="review-row" key={review.id}><div className="review-rating">{"★".repeat(review.rating)}{"☆".repeat(5 - review.rating)}</div><b>{review.book_title}</b><p>“{review.comment}”</p><small>{review.member_name} · {new Date(review.created_at).toLocaleDateString()}</small></article>)}{loading && <p className="empty">Loading reader notes…</p>}{!loading && reviews.length === 0 && <p className="empty">No notes yet.</p>}</div></section>
+      <section className="panel list-panel"><div className="panel-head"><div><span className="eyebrow">WORDS WORTH KEEPING</span><h3>Community notes</h3></div></div><div className="review-list" aria-busy={loading}>{reviews.map((review) => <article className="review-row" key={review.id}><div className="review-rating" role="img" aria-label={`${review.rating} out of 5 stars`}>{"★".repeat(review.rating)}{"☆".repeat(5 - review.rating)}</div><b>{review.book_title}</b><p>“{review.comment}”</p><small>{review.member_name} · {new Date(review.created_at).toLocaleDateString()}</small></article>)}{loading && <LoadingState label="Loading reader notes…" />}{!loading && !loadError && reviews.length === 0 && <p className="empty" role="status">No notes yet.</p>}</div></section>
     </div>
   </>;
 }
@@ -620,11 +738,13 @@ function StudentBookReviews({ book, setNotice, onRatingChange }) {
   const [comment, setComment] = useState("");
   const [hasReview, setHasReview] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState(null);
 
   async function load() {
     setLoading(true);
+    setLoadError("");
     try {
       const data = await api(`/books/${book.id}/reviews/`);
       setReviews(data.results);
@@ -634,12 +754,15 @@ function StudentBookReviews({ book, setNotice, onRatingChange }) {
       setHasReview(Boolean(data.my_review));
       setRating(data.my_review?.rating || 0);
       setComment(data.my_review?.comment || "");
+    } catch (error) {
+      setLoadError(error.message);
+      throw error;
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => { load().catch((error) => noticeText(setNotice, error.message, "error")); }, [book.id]);
+  useEffect(() => { load().catch(() => {}); }, [book.id]);
 
   async function submit(event) {
     event.preventDefault();
@@ -663,7 +786,8 @@ function StudentBookReviews({ book, setNotice, onRatingChange }) {
   }
 
   return <section className="panel student-reviews-panel">
-    <div className="panel-head"><div><span className="eyebrow">PUBLIC READER RATINGS</span><h3>What readers think</h3></div><button className="button light small" disabled={loading} onClick={() => load().catch((error) => noticeText(setNotice, error.message, "error"))}>{loading ? "Loading…" : "Refresh"}</button></div>
+    <div className="panel-head"><div><span className="eyebrow">PUBLIC READER RATINGS</span><h3>What readers think</h3></div><button className="button light small" disabled={loading} onClick={() => load().catch(() => {})}>{loading ? "Loading…" : "Refresh"}</button></div>
+    {loadError && <LoadError message={loadError} onRetry={() => load().catch(() => {})} />}
     <div className="reader-rating-overview"><strong>{ratingCount ? average.toFixed(1) : "—"}</strong><div><BookRating rating={average} count={ratingCount} /><small>{ratingCount ? `Based on ${ratingCount} student rating${ratingCount === 1 ? "" : "s"}` : "No one has rated this book yet."}</small></div></div>
     <form className="student-review-form" onSubmit={submit}>
       {feedback && <div className={`notice ${feedback.kind}`} role={feedback.kind === "error" ? "alert" : "status"}>{feedback.text}</div>}
@@ -674,9 +798,9 @@ function StudentBookReviews({ book, setNotice, onRatingChange }) {
       <label>Note <span>(optional, up to 500 characters)</span><textarea value={comment} onChange={(event) => setComment(event.target.value)} maxLength={500} rows={3} placeholder="Share what you liked or who you would recommend it to." disabled={busy || loading} /></label>
       <div className="student-review-submit"><small>Your rating and note will be visible to readers in the catalogue.</small><button className="button primary" disabled={busy || loading || rating < 1}>{busy ? "Publishing…" : hasReview ? "Update public rating" : "Publish rating"}</button></div>
     </form>
-    <div className="public-review-list" aria-live="polite">
-      {reviews.map((review) => <article className="public-review-card" key={review.id}><span className="public-review-stars" aria-label={`${review.rating} out of 5 stars`}>{"★".repeat(review.rating)}{"☆".repeat(5 - review.rating)}</span><p>{review.comment || "Rated without a written note."}</p><small>{review.member_name} · {new Date(review.created_at).toLocaleDateString()}</small></article>)}
-      {loading && <p className="empty">Loading reader ratings…</p>}{!loading && reviews.length === 0 && <p className="empty">Be the first reader to rate this title.</p>}
+    <div className="public-review-list" aria-busy={loading}>
+      {reviews.map((review) => <article className="public-review-card" key={review.id}><span className="public-review-stars" role="img" aria-label={`${review.rating} out of 5 stars`}>{"★".repeat(review.rating)}{"☆".repeat(5 - review.rating)}</span><p>{review.comment || "Rated without a written note."}</p><small>{review.member_name} · {new Date(review.created_at).toLocaleDateString()}</small></article>)}
+      {loading && <LoadingState label="Loading reader ratings…" />}{!loading && !loadError && reviews.length === 0 && <p className="empty" role="status">Be the first reader to rate this title.</p>}
     </div>
   </section>;
 }
@@ -704,31 +828,38 @@ function IssueSlip({ loan, onClose }) {
   </section>;
 }
 
-function ReservationsPage({ setNotice }) {
+function ReservationsPage() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   async function load() {
     setLoading(true);
+    setLoadError("");
     try { setItems((await api("/reservations/")).results); }
+    catch (error) { setLoadError(error.message); }
     finally { setLoading(false); }
   }
-  useEffect(() => { load().catch((error) => noticeText(setNotice, error.message, "error")); }, []);
+  useEffect(() => { load(); }, []);
   return <>
-    <PageTitle eyebrow="CIRCULATION / HOLDS" title="Book reservations" note="A copy returning to the shelf is assigned to the next student in line." action={<button className="button light" disabled={loading} onClick={() => load().catch((error) => noticeText(setNotice, error.message, "error"))}>Refresh queue</button>} />
-    <section className="panel"><div className="reservation-list">{items.map((item) => <article className="reservation-row" key={item.id}><div className="reservation-mark">{item.status === "ready" ? "✓" : "↗"}</div><div className="reservation-info"><b>{item.book_title}</b><span>{item.author} · Shelf {item.shelf}</span><small>{item.student_name} · {item.student_id} · Placed {new Date(item.created_at).toLocaleDateString()}</small></div><span className={`status ${item.status}`}>{item.status === "ready" ? "Ready for pickup" : item.status}</span></article>)}{loading && <p className="empty">Loading reservations…</p>}{!loading && items.length === 0 && <p className="empty">There are no book holds yet.</p>}</div></section>
+    <PageTitle eyebrow="CIRCULATION / HOLDS" title="Book reservations" note="A copy returning to the shelf is assigned to the next student in line." action={<button className="button light" disabled={loading} onClick={load}>{loading ? "Refreshing…" : "Refresh queue"}</button>} />
+    {loadError && <LoadError message={loadError} onRetry={load} />}
+    <section className="panel"><div className="reservation-list" aria-busy={loading}>{items.map((item) => <article className="reservation-row" key={item.id}><div className="reservation-mark" aria-hidden="true">{item.status === "ready" ? "✓" : "↗"}</div><div className="reservation-info"><b>{item.book_title}</b><span>{item.author} · Shelf {item.shelf}</span><small>{item.student_name} · {item.student_id} · Placed {new Date(item.created_at).toLocaleDateString()}</small></div><span className={`status ${item.status}`}>{item.status === "ready" ? "Ready for pickup" : item.status}</span></article>)}{loading && <LoadingState label="Loading reservations…" />}{!loading && !loadError && items.length === 0 && <p className="empty" role="status">There are no book holds yet.</p>}</div></section>
   </>;
 }
 
 function RenewalsPage({ setNotice }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [busyId, setBusyId] = useState("");
   async function load() {
     setLoading(true);
+    setLoadError("");
     try { setItems((await api("/renewals/")).results); }
+    catch (error) { setLoadError(error.message); }
     finally { setLoading(false); }
   }
-  useEffect(() => { load().catch((error) => noticeText(setNotice, error.message, "error")); }, []);
+  useEffect(() => { load(); }, []);
   async function review(item, action) {
     setBusyId(item.id);
     try {
@@ -739,28 +870,33 @@ function RenewalsPage({ setNotice }) {
     finally { setBusyId(""); }
   }
   return <>
-    <PageTitle eyebrow="CIRCULATION / RENEWALS" title="Renewal requests" note="Approve one 14-day extension when the loan is current and no other student is waiting for the title." action={<button className="button light" disabled={loading} onClick={() => load().catch((error) => noticeText(setNotice, error.message, "error"))}>Refresh requests</button>} />
-    <section className="panel"><div className="reservation-list">{items.map((item) => <article className="reservation-row" key={item.id}><div className="reservation-mark">↻</div><div className="reservation-info"><b>{item.book_title}</b><span>{item.student_name} · {item.student_id} · Copy {item.copy_id}</span><small>Requested {new Date(item.created_at).toLocaleDateString()} · Due {new Date(item.due_at).toLocaleDateString()} · {item.issue_code}</small></div><span className={`status ${item.status}`}>{item.status}</span>{item.status === "pending" && <div className="row-actions"><button className="button primary small" disabled={Boolean(busyId)} onClick={() => review(item, "approve")}>{busyId === item.id ? "Saving…" : "Approve +14 days"}</button><button className="button danger small" disabled={Boolean(busyId)} onClick={() => review(item, "reject")}>Decline</button></div>}</article>)}{loading && <p className="empty">Loading renewal requests…</p>}{!loading && items.length === 0 && <p className="empty">No renewal requests yet.</p>}</div></section>
+    <PageTitle eyebrow="CIRCULATION / RENEWALS" title="Renewal requests" note="Approve one 14-day extension when the loan is current and no other student is waiting for the title." action={<button className="button light" disabled={loading} onClick={load}>{loading ? "Refreshing…" : "Refresh requests"}</button>} />
+    {loadError && <LoadError message={loadError} onRetry={load} />}
+    <section className="panel"><div className="reservation-list" aria-busy={loading}>{items.map((item) => <article className="reservation-row" key={item.id}><div className="reservation-mark" aria-hidden="true">↻</div><div className="reservation-info"><b>{item.book_title}</b><span>{item.student_name} · {item.student_id} · Copy {item.copy_id}</span><small>Requested {new Date(item.created_at).toLocaleDateString()} · Due {new Date(item.due_at).toLocaleDateString()} · {item.issue_code}</small></div><span className={`status ${item.status}`}>{item.status}</span>{item.status === "pending" && <div className="row-actions"><button className="button primary small" disabled={Boolean(busyId)} onClick={() => review(item, "approve")}>{busyId === item.id ? "Saving…" : "Approve +14 days"}</button><button className="button danger small" disabled={Boolean(busyId)} onClick={() => review(item, "reject")}>Decline</button></div>}</article>)}{loading && <LoadingState label="Loading renewal requests…" />}{!loading && !loadError && items.length === 0 && <p className="empty" role="status">No renewal requests yet.</p>}</div></section>
   </>;
 }
 
-function ReportsPage({ setNotice }) {
+function ReportsPage() {
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   async function load() {
     setLoading(true);
+    setLoadError("");
     try { setReport(await api("/reports/")); }
+    catch (error) { setLoadError(error.message); }
     finally { setLoading(false); }
   }
-  useEffect(() => { load().catch((error) => noticeText(setNotice, error.message, "error")); }, []);
+  useEffect(() => { load(); }, []);
   const maxPopular = Math.max(1, ...(report?.popular_books || []).map((item) => item.borrowings));
   const maxMonth = Math.max(1, ...(report?.circulation || []).flatMap((item) => [item.issues, item.returns]));
   return <>
-    <PageTitle eyebrow="LIBRARY ANALYTICS" title="Circulation reports" note="See which titles readers choose and how borrowing activity changes over six months." action={<button className="button light" disabled={loading} onClick={() => load().catch((error) => noticeText(setNotice, error.message, "error"))}>Refresh report</button>} />
+    <PageTitle eyebrow="LIBRARY ANALYTICS" title="Circulation reports" note="See which titles readers choose and how borrowing activity changes over six months." action={<button className="button light" disabled={loading} onClick={load}>{loading ? "Refreshing…" : "Refresh report"}</button>} />
+    {loadError && <LoadError message={loadError} onRetry={load} />}
     {report && <div className="stats-grid report-stats"><StatCard label="Lifetime checkouts" value={report.totals.borrowings} note="All recorded issue transactions" /><StatCard label="Currently borrowed" value={report.totals.active} note="Active circulation" /><StatCard label="Completed returns" value={report.totals.returned} note="Returned to the collection" /></div>}
-    <div className="reports-grid"><section className="panel"><div className="panel-head"><div><span className="eyebrow">MOST BORROWED</span><h3>Popular titles</h3></div></div><div className="report-rank-list">{report?.popular_books.map((item, index) => <div className="report-rank" key={item.title}><span>{String(index + 1).padStart(2, "0")}</span><div><b>{item.title}</b><div className="report-bar"><i style={{ width: `${Math.max(5, item.borrowings / maxPopular * 100)}%` }} /></div></div><strong>{item.borrowings}</strong></div>)}{loading && <p className="empty">Loading popular titles…</p>}{!loading && !report?.popular_books.length && <p className="empty">Borrowing history will appear here.</p>}</div></section>
-      <section className="panel"><div className="panel-head"><div><span className="eyebrow">LAST SIX MONTHS</span><h3>Borrowing activity</h3></div></div><div className="circulation-chart">{report?.circulation.map((month) => <div className="circulation-month" key={month.month}><div className="circulation-bars"><i className="issue-bar" title={`${month.issues} checkouts`} style={{ height: `${Math.max(3, month.issues / maxMonth * 100)}%` }} /><i className="return-bar" title={`${month.returns} returns`} style={{ height: `${Math.max(3, month.returns / maxMonth * 100)}%` }} /></div><small>{month.label}</small></div>)}{loading && <p className="empty">Loading monthly activity…</p>}</div><div className="chart-legend"><span><i className="issue-bar" /> Checkouts</span><span><i className="return-bar" /> Returns</span></div></section></div>
-    <section className="panel"><div className="panel-head"><div><span className="eyebrow">LATEST ACTIVITY</span><h3>Recent transactions</h3></div></div><div className="table-scroll"><table><thead><tr><th>Issue ID</th><th>Title</th><th>Student</th><th>Issued</th><th>Due</th><th>Status</th></tr></thead><tbody>{report?.recent_transactions.map((item) => <tr key={item.issue_code}><td><code>{item.issue_code}</code></td><td>{item.book_title}</td><td>{item.student_name}<small>{item.student_id}</small></td><td>{new Date(item.borrowed_at).toLocaleDateString()}</td><td>{new Date(item.due_at).toLocaleDateString()}</td><td><span className={`status ${item.status}`}>{item.status}</span></td></tr>)}</tbody></table></div>{loading && <p className="empty">Loading recent transactions…</p>}{!loading && !report?.recent_transactions.length && <p className="empty">There are no transactions yet.</p>}</section>
+    <div className="reports-grid"><section className="panel"><div className="panel-head"><div><span className="eyebrow">MOST BORROWED</span><h3>Popular titles</h3></div></div><div className="report-rank-list" aria-busy={loading}>{report?.popular_books.map((item, index) => <div className="report-rank" key={item.title}><span>{String(index + 1).padStart(2, "0")}</span><div><b>{item.title}</b><div className="report-bar"><i style={{ width: `${Math.max(5, item.borrowings / maxPopular * 100)}%` }} /></div></div><strong>{item.borrowings}</strong></div>)}{loading && <LoadingState label="Loading popular titles…" />}{!loading && !loadError && !report?.popular_books.length && <p className="empty" role="status">Borrowing history will appear here.</p>}</div></section>
+      <section className="panel"><div className="panel-head"><div><span className="eyebrow">LAST SIX MONTHS</span><h3>Borrowing activity</h3></div></div><div className="circulation-chart" aria-busy={loading}>{report?.circulation.map((month) => <div className="circulation-month" key={month.month}><div className="circulation-bars"><i className="issue-bar" title={`${month.issues} checkouts`} style={{ height: `${Math.max(3, month.issues / maxMonth * 100)}%` }} /><i className="return-bar" title={`${month.returns} returns`} style={{ height: `${Math.max(3, month.returns / maxMonth * 100)}%` }} /></div><small>{month.label}</small></div>)}{loading && <LoadingState label="Loading monthly activity…" />}{!loading && !loadError && !report?.circulation.length && <p className="empty" role="status">No borrowing activity yet.</p>}</div><div className="chart-legend"><span><i className="issue-bar" /> Checkouts</span><span><i className="return-bar" /> Returns</span></div></section></div>
+    <section className="panel"><div className="panel-head"><div><span className="eyebrow">LATEST ACTIVITY</span><h3>Recent transactions</h3></div></div><div className="table-scroll" aria-busy={loading}><table><thead><tr><th>Issue ID</th><th>Title</th><th>Student</th><th>Issued</th><th>Due</th><th>Status</th></tr></thead><tbody>{report?.recent_transactions.map((item) => <tr key={item.issue_code}><td><code>{item.issue_code}</code></td><td>{item.book_title}</td><td>{item.student_name}<small>{item.student_id}</small></td><td>{new Date(item.borrowed_at).toLocaleDateString()}</td><td>{new Date(item.due_at).toLocaleDateString()}</td><td><span className={`status ${item.status}`}>{item.status}</span></td></tr>)}</tbody></table>{loading && <LoadingState label="Loading recent transactions…" />}{!loading && !loadError && !report?.recent_transactions.length && <p className="empty" role="status">There are no transactions yet.</p>}</div></section>
   </>;
 }
 
@@ -780,7 +916,11 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
   const [spaces, setSpaces] = useState([]);
   const [myBookings, setMyBookings] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const requestSequence = useRef(0);
   const [bookingModal, setBookingModal] = useState(null);
+  const bookingDialogRef = useRef(null);
+  const bookingDialogId = useId();
   const [modalError, setModalError] = useState("");
   const [bookingForm, setBookingForm] = useState({
     date: todayStr,
@@ -791,20 +931,24 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
   });
   const [submitting, setSubmitting] = useState(false);
   const [cancellingId, setCancellingId] = useState("");
+  useAccessibleDialog(Boolean(bookingModal), bookingDialogRef, () => !submitting && setBookingModal(null));
 
   async function loadData() {
+    const sequence = ++requestSequence.current;
     setLoading(true);
+    setLoadError("");
     try {
       const [spacesData, bookingsData] = await Promise.all([
         api(`/spaces/?date=${encodeURIComponent(selectedDate)}`),
         api("/student/space-bookings/"),
       ]);
+      if (sequence !== requestSequence.current) return;
       setSpaces(spacesData.results || []);
       setMyBookings(bookingsData.results || []);
     } catch (err) {
-      noticeText(setNotice, err.message, "error");
+      if (sequence === requestSequence.current) setLoadError(err.message);
     } finally {
-      setLoading(false);
+      if (sequence === requestSequence.current) setLoading(false);
     }
   }
 
@@ -941,6 +1085,14 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
         note="Reserve quiet focus pods, duo study spaces, or conference rooms for your individual or group study sessions."
       />
 
+      {loadError && <LoadError message={loadError} onRetry={loadData} />}
+
+      {subTab === "browse" && <section className="space-booking-visual">
+        <img src="/assets/study-space-pod.jpg" alt="A sunlit study pod with books, a desk lamp, and a quiet place to focus" loading="lazy" />
+        <div className="space-booking-visual-copy"><span className="eyebrow">MAKE SPACE FOR A GOOD IDEA</span><h2>Find your focus corner.</h2><p>Choose a quiet pod for solo work or reserve a room when the group project needs a table.</p></div>
+        <span className="space-booking-visual-note" aria-hidden="true">READ · THINK · REPEAT</span>
+      </section>}
+
       <div className="subnav-tabs">
         <button
           type="button"
@@ -980,7 +1132,7 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
           </div>
 
           <RecordFilters query={spaceQuery} onQuery={setSpaceQuery} choices={{ space_type: spaceType, availability: availFilter }} onChoices={(choices) => { setSpaceType(choices.space_type || []); setAvailFilter(choices.availability || []); }} count={filteredSpaces.length} loading={loading} label="Search spaces, locations, or amenities" groups={[{ key: "space_type", label: "Space type", options: [{ value: "pod", label: "Study pods" }, { value: "room", label: "Conference rooms" }, { value: "slot", label: "Study slots" }] }, { key: "availability", label: "Availability", options: [{ value: "empty_only", label: "Free slots available" }, { value: "occupied_only", label: "Booked or pending slots" }] }]} />
-          <div className="space-grid">
+          <div className="space-grid" aria-busy={loading}>
             {filteredSpaces.map((space) => (
               <article className="space-card" key={space.id}>
                 <div className="space-top">
@@ -1047,9 +1199,9 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
                 </div>
               </article>
             ))}
-            {loading && <p className="empty">Checking space schedules…</p>}
-            {!loading && filteredSpaces.length === 0 && (
-              <p className="empty">No spaces match the selected filters.</p>
+            {loading && <LoadingState label="Checking space schedules…" />}
+            {!loading && !loadError && filteredSpaces.length === 0 && (
+              <p className="empty" role="status">No spaces match the selected filters.</p>
             )}
           </div>
         </>
@@ -1067,7 +1219,7 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
             </button>
           </div>
 
-          <div className="booking-list">
+          <div className="booking-list" aria-busy={loading}>
             {myBookings.map((b) => (
               <article className="booking-row-card" key={b.id}>
                 <div className="booking-card-main">
@@ -1115,9 +1267,9 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
                 </div>
               </article>
             ))}
-            {loading && <p className="empty">Loading your space bookings…</p>}
-            {!loading && myBookings.length === 0 && (
-              <p className="empty">You haven't requested any space or pod bookings yet.</p>
+            {loading && <LoadingState label="Loading your space bookings…" />}
+            {!loading && !loadError && myBookings.length === 0 && (
+              <p className="empty" role="status">You haven't requested any space or pod bookings yet.</p>
             )}
           </div>
         </section>
@@ -1125,11 +1277,11 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
 
       {bookingModal && (
         <div className="booking-modal-overlay" onClick={() => !submitting && setBookingModal(null)}>
-          <div className="booking-modal" role="dialog" aria-modal="true" aria-label="Space booking" onClick={(e) => e.stopPropagation()}>
+          <div ref={bookingDialogRef} className="booking-modal" role="dialog" aria-modal="true" aria-labelledby={`${bookingDialogId}-title`} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
             <div className="booking-modal-header">
               <div>
                 <span className="eyebrow">{bookingModal.space_type_display}</span>
-                <h3>Book {bookingModal.name}</h3>
+                <h3 id={`${bookingDialogId}-title`}>Book {bookingModal.name}</h3>
                 <p><MapPin size={14} aria-hidden="true" /> {bookingModal.location} · Max capacity: {bookingModal.capacity} students</p>
               </div>
               <button
@@ -1146,6 +1298,8 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
               {modalError && (
                 <div
                   className="notice error"
+                  role="alert"
+                  aria-live="assertive"
                   style={{
                     margin: "0 0 14px",
                     padding: "9px 12px",
@@ -1157,7 +1311,7 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
                     gap: "8px",
                   }}
                 >
-                  <span>⚠️</span>
+                  <span aria-hidden="true">⚠️</span>
                   <span>{modalError}</span>
                 </div>
               )}
@@ -1272,12 +1426,19 @@ function LibrarianSpaceBookingsPage({ setNotice }) {
   const [dateFilter, setDateFilter] = useState("");
   const [scheduleDate, setScheduleDate] = useState(getLocalDateStr());
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const requestSequence = useRef(0);
   const [busyId, setBusyId] = useState("");
   const [rejectingBooking, setRejectingBooking] = useState(null);
+  const rejectDialogRef = useRef(null);
+  const rejectDialogId = useId();
   const [rejectReason, setRejectReason] = useState("");
+  useAccessibleDialog(Boolean(rejectingBooking), rejectDialogRef, () => setRejectingBooking(null));
 
   async function loadData() {
+    const sequence = ++requestSequence.current;
     setLoading(true);
+    setLoadError("");
     try {
       const params = new URLSearchParams();
       if (dateFilter) params.append("date", dateFilter);
@@ -1286,12 +1447,13 @@ function LibrarianSpaceBookingsPage({ setNotice }) {
         api(`/librarian/space-bookings/?${params}`),
         api(`/spaces/?date=${encodeURIComponent(scheduleDate)}`),
       ]);
+      if (sequence !== requestSequence.current) return;
       setBookings(bookingsData.results || []);
       setSpaces(spacesData.results || []);
     } catch (err) {
-      noticeText(setNotice, err.message, "error");
+      if (sequence === requestSequence.current) setLoadError(err.message);
     } finally {
-      setLoading(false);
+      if (sequence === requestSequence.current) setLoading(false);
     }
   }
 
@@ -1332,6 +1494,8 @@ function LibrarianSpaceBookingsPage({ setNotice }) {
           </button>
         }
       />
+
+      {loadError && <LoadError message={loadError} onRetry={loadData} />}
 
       <div className="stats-grid">
         <StatCard label="Pending Approval" value={pendingList.length} note="Requests waiting for review" />
@@ -1384,7 +1548,7 @@ function LibrarianSpaceBookingsPage({ setNotice }) {
           </div>
 
           <RecordFilters query={bookingQuery} onQuery={setBookingQuery} choices={bookingFilters} onChoices={setBookingFilters} count={visibleBookings.length} loading={loading} label="Search student, ID, room, or purpose" groups={[{ key: "status", label: "Booking status", options: [{ value: "pending", label: "Pending" }, { value: "confirmed", label: "Confirmed" }, { value: "rejected", label: "Rejected" }, { value: "cancelled", label: "Cancelled" }] }, { key: "space_type", label: "Space type", options: [{ value: "pod", label: "Study pods" }, { value: "room", label: "Conference rooms" }, { value: "slot", label: "Study slots" }] }]} />
-          <div className="booking-list">
+          <div className="booking-list" aria-busy={loading}>
             {visibleBookings.map((b) => (
               <article className="booking-row-card" key={b.id}>
                 <div className="booking-card-main">
@@ -1447,9 +1611,9 @@ function LibrarianSpaceBookingsPage({ setNotice }) {
                 </div>
               </article>
             ))}
-            {loading && <p className="empty">Loading requests…</p>}
-            {!loading && visibleBookings.length === 0 && (
-              <p className="empty">No booking requests found for the selected filter.</p>
+            {loading && <LoadingState label="Loading requests…" />}
+            {!loading && !loadError && visibleBookings.length === 0 && (
+              <p className="empty" role="status">No booking requests found for the selected filter.</p>
             )}
           </div>
         </section>
@@ -1468,7 +1632,7 @@ function LibrarianSpaceBookingsPage({ setNotice }) {
             </label>
           </div>
 
-          <div className="space-grid">
+          <div className="space-grid" aria-busy={loading}>
             {spaces.map((sp) => (
               <article className="space-card" key={sp.id}>
                 <div className="space-top">
@@ -1508,17 +1672,19 @@ function LibrarianSpaceBookingsPage({ setNotice }) {
                 </div>
               </article>
             ))}
+            {loading && <LoadingState label="Loading space schedules…" />}
+            {!loading && !loadError && spaces.length === 0 && <p className="empty" role="status">No library spaces are available for this date.</p>}
           </div>
         </section>
       )}
 
       {rejectingBooking && (
         <div className="booking-modal-overlay" onClick={() => setRejectingBooking(null)}>
-          <div className="booking-modal" role="dialog" aria-modal="true" aria-label="Space booking" onClick={(e) => e.stopPropagation()}>
+          <div ref={rejectDialogRef} className="booking-modal" role="dialog" aria-modal="true" aria-labelledby={`${rejectDialogId}-title`} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
             <div className="booking-modal-header">
               <div>
                 <span className="eyebrow">DECLINE REQUEST</span>
-                <h3>Reject Booking Request</h3>
+                <h3 id={`${rejectDialogId}-title`}>Reject Booking Request</h3>
                 <p>{rejectingBooking.space_name} · {rejectingBooking.booking_date} ({rejectingBooking.start_time} - {rejectingBooking.end_time})</p>
               </div>
               <button
@@ -1572,6 +1738,8 @@ function StudentPortal({ user, tab, setTab, setNotice, selectedBook, onOpenBook,
   const [holds, setHolds] = useState([]);
   const [fines, setFines] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const loadSequence = useRef(0);
   const [busy, setBusy] = useState(false);
   const [renewingLoanId, setRenewingLoanId] = useState("");
   const [copyId, setCopyId] = useState("");
@@ -1580,16 +1748,29 @@ function StudentPortal({ user, tab, setTab, setNotice, selectedBook, onOpenBook,
   const [slip, setSlip] = useState(null);
 
   async function load() {
+    const sequence = ++loadSequence.current;
     setLoading(true);
+    setLoadError("");
     try {
-      if (tab === "my_loans") setLoans((await api("/student/loans/")).results);
-      if (tab === "my_holds") setHolds((await api("/student/reservations/")).results);
-      if (tab === "my_fines") setFines((await api("/fines/")).results);
+      if (tab === "my_loans") {
+        const result = await api("/student/loans/");
+        if (sequence === loadSequence.current) setLoans(result.results);
+      }
+      if (tab === "my_holds") {
+        const result = await api("/student/reservations/");
+        if (sequence === loadSequence.current) setHolds(result.results);
+      }
+      if (tab === "my_fines") {
+        const result = await api("/fines/");
+        if (sequence === loadSequence.current) setFines(result.results);
+      }
+    } catch (error) {
+      if (sequence === loadSequence.current) setLoadError(error.message);
     } finally {
-      setLoading(false);
+      if (sequence === loadSequence.current) setLoading(false);
     }
   }
-  useEffect(() => { load().catch((error) => noticeText(setNotice, error.message, "error")); }, [tab]);
+  useEffect(() => { load(); }, [tab]);
 
   async function scanned(value) {
     setScanOpen(false);
@@ -1679,23 +1860,26 @@ function StudentPortal({ user, tab, setTab, setNotice, selectedBook, onOpenBook,
 
   if (tab === "my_loans") return <>
     <PageTitle eyebrow="STUDENT PORTAL / CIRCULATION" title="My loans" note="Your active issues, due-date alerts, and return dates." />
+    {loadError && <LoadError message={loadError} onRetry={load} />}
     {slip && <IssueSlip loan={slip} onClose={() => setSlip(null)} />}
     {dueAlerts.length > 0 && <section className="due-alert-list" aria-label="Due date alerts">{dueAlerts.map((loan) => <article className={`due-alert ${loan.due_status}`} key={loan.id}><span className="due-alert-icon" aria-hidden="true">{loan.due_status === "overdue" ? "!" : "◷"}</span><div><b>{loan.book_title}</b><span>{loan.due_message}{loan.due_status === "overdue" && Number(loan.current_fine) > 0 ? ` · Current fine ₹${loan.current_fine}` : ""}</span></div></article>)}</section>}
-    <section className="panel"><div className="table-scroll"><table><thead><tr><th>Book</th><th>Copy ID</th><th>Issue ID</th><th>Due date</th><th>Fine today</th><th>Status</th><th>Renewal</th><th>Slip / return QR</th></tr></thead><tbody>{loans.map((loan) => <tr key={loan.id}><td><b>{loan.book_title}</b><small>{loan.book_author}</small></td><td><code>{loan.copy_id}</code></td><td><code>{loan.issue_code}</code></td><td>{new Date(loan.due_at).toLocaleDateString()}</td><td>{loan.current_fine === "0" ? "—" : `₹${loan.current_fine}`}</td><td><span className={`status ${loan.status}`}>{loan.status}</span></td><td>{loan.renewal_status === "pending" ? <span className="status pending">In review</span> : loan.renewal_status === "approved" ? <span className="status approved">Renewed</span> : loan.renewal_status === "rejected" ? <span className="renewal-rejected"><span className="status rejected">Declined</span>{loan.renewal_allowed && <button className="button light small" disabled={renewingLoanId === loan.id} onClick={() => requestRenewal(loan)}>{renewingLoanId === loan.id ? "Sending…" : "Request again"}</button>}</span> : loan.renewal_allowed ? <button className="button light small" disabled={renewingLoanId === loan.id} onClick={() => requestRenewal(loan)}>{renewingLoanId === loan.id ? "Sending…" : "Request renewal"}</button> : "—"}</td><td><button className="button light small" onClick={() => openIssueSlip(loan)}>{loan.status === "borrowed" ? "Open return QR & slip" : "Open issue slip"}</button></td></tr>)}</tbody></table></div>{loading && <p className="empty">Loading your loans…</p>}{!loading && loans.length === 0 && <p className="empty">You do not have any loans yet.</p>}</section>
+    <section className="panel"><div className="table-scroll" aria-busy={loading}><table><thead><tr><th>Book</th><th>Copy ID</th><th>Issue ID</th><th>Due date</th><th>Fine today</th><th>Status</th><th>Renewal</th><th>Slip / return QR</th></tr></thead><tbody>{loans.map((loan) => <tr key={loan.id}><td><b>{loan.book_title}</b><small>{loan.book_author}</small></td><td><code>{loan.copy_id}</code></td><td><code>{loan.issue_code}</code></td><td>{new Date(loan.due_at).toLocaleDateString()}</td><td>{loan.current_fine === "0" ? "—" : `₹${loan.current_fine}`}</td><td><span className={`status ${loan.status}`}>{loan.status}</span></td><td>{loan.renewal_status === "pending" ? <span className="status pending">In review</span> : loan.renewal_status === "approved" ? <span className="status approved">Renewed</span> : loan.renewal_status === "rejected" ? <span className="renewal-rejected"><span className="status rejected">Declined</span>{loan.renewal_allowed && <button className="button light small" disabled={renewingLoanId === loan.id} onClick={() => requestRenewal(loan)}>{renewingLoanId === loan.id ? "Sending…" : "Request again"}</button>}</span> : loan.renewal_allowed ? <button className="button light small" disabled={renewingLoanId === loan.id} onClick={() => requestRenewal(loan)}>{renewingLoanId === loan.id ? "Sending…" : "Request renewal"}</button> : "—"}</td><td><button className="button light small" onClick={() => openIssueSlip(loan)}>{loan.status === "borrowed" ? "Open return QR & slip" : "Open issue slip"}</button></td></tr>)}</tbody></table>{loading && <LoadingState label="Loading your loans…" />}{!loading && !loadError && loans.length === 0 && <p className="empty" role="status">You do not have any loans yet.</p>}</div></section>
   </>;
 
   if (tab === "my_holds") return <>
     <PageTitle eyebrow="STUDENT PORTAL / RESERVATIONS" title="My holds" note="Follow your place in line and see when a copy is ready for pickup." />
-    <section className="panel"><div className="reservation-list">{holds.map((hold) => <article className="reservation-row" key={hold.id}><div className="reservation-mark">{hold.status === "ready" ? "✓" : "↗"}</div><div className="reservation-info"><b>{hold.book_title}</b><span>{hold.author} · Shelf {hold.shelf}</span><small>Placed {new Date(hold.created_at).toLocaleDateString()}{hold.status === "waiting" && hold.queue_position ? ` · Queue position ${hold.queue_position}` : ""}</small></div><span className={`status ${hold.status}`}>{hold.status === "ready" ? "Ready for pickup" : hold.status}</span>{["waiting", "ready"].includes(hold.status) && <button className="button light small" onClick={() => cancelHold(hold)}>Cancel hold</button>}</article>)}{loading && <p className="empty">Loading your reservations…</p>}{!loading && holds.length === 0 && <p className="empty">No holds yet. Reserve a title from its details page when all copies are in use.</p>}</div></section>
+    {loadError && <LoadError message={loadError} onRetry={load} />}
+    <section className="panel"><div className="reservation-list" aria-busy={loading}>{holds.map((hold) => <article className="reservation-row" key={hold.id}><div className="reservation-mark" aria-hidden="true">{hold.status === "ready" ? "✓" : "↗"}</div><div className="reservation-info"><b>{hold.book_title}</b><span>{hold.author} · Shelf {hold.shelf}</span><small>Placed {new Date(hold.created_at).toLocaleDateString()}{hold.status === "waiting" && hold.queue_position ? ` · Queue position ${hold.queue_position}` : ""}</small></div><span className={`status ${hold.status}`}>{hold.status === "ready" ? "Ready for pickup" : hold.status}</span>{["waiting", "ready"].includes(hold.status) && <button className="button light small" onClick={() => cancelHold(hold)}>Cancel hold</button>}</article>)}{loading && <LoadingState label="Loading your reservations…" />}{!loading && !loadError && holds.length === 0 && <p className="empty" role="status">No holds yet. Reserve a title from its details page when all copies are in use.</p>}</div></section>
   </>;
 
   return <>
     <PageTitle eyebrow="STUDENT PORTAL / ACCOUNT" title="My fines" note="The current overdue amount starts on the calendar day after your due date." />
+    {loadError && <LoadError message={loadError} onRetry={load} />}
     <section className="student-fine-summary" aria-label="Outstanding fine balance">
       <div><span className="eyebrow">OUTSTANDING BALANCE</span><strong>{loading ? "—" : `₹${fines.filter((fine) => fine.status === "unpaid").reduce((total, fine) => total + Number(fine.amount), 0).toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`}</strong><p>{loading ? "Checking your current fine balance…" : fines.some((fine) => fine.status === "unpaid") ? "Please visit the library desk to settle your balance." : "You are all clear. There are no unpaid fines on your account."}</p></div>
-      <span className="student-fine-count">{loading ? "Loading…" : `${fines.filter((fine) => fine.status === "unpaid").length} unpaid`}</span>
+      <span className="student-fine-count" aria-live="polite">{loading ? "Loading…" : `${fines.filter((fine) => fine.status === "unpaid").length} unpaid`}</span>
     </section>
-    <section className="panel"><div className="panel-head"><div><span className="eyebrow">YOUR ACCOUNT</span><h3>Fine history</h3></div><button className="button light small" disabled={loading} onClick={() => load().catch((error) => noticeText(setNotice, error.message, "error"))}>{loading ? "Refreshing…" : "Refresh fines"}</button></div><div className="fine-list">{fines.map((fine) => <article className="fine-row" key={fine.id}><div className="fine-amount">₹{Number(fine.amount).toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</div><div className="fine-info"><b>{fine.reason}</b><span>{fine.fine_type === "overdue" ? "Overdue fine" : "Custom fine"}</span><small>{new Date(fine.created_at).toLocaleDateString()}{fine.paid_at ? ` · Paid ${new Date(fine.paid_at).toLocaleDateString()}` : ""}</small></div><span className={`status ${fine.status}`}>{fine.status}</span></article>)}{loading && <p className="empty">Loading your fines…</p>}{!loading && fines.length === 0 && <p className="empty">You do not have any fines.</p>}</div></section>
+    <section className="panel"><div className="panel-head"><div><span className="eyebrow">YOUR ACCOUNT</span><h3>Fine history</h3></div><button className="button light small" disabled={loading} onClick={load}>{loading ? "Refreshing…" : "Refresh fines"}</button></div><div className="fine-list" aria-busy={loading}>{fines.map((fine) => <article className="fine-row" key={fine.id}><div className="fine-amount">₹{Number(fine.amount).toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</div><div className="fine-info"><b>{fine.reason}</b><span>{fine.fine_type === "overdue" ? "Overdue fine" : "Custom fine"}</span><small>{new Date(fine.created_at).toLocaleDateString()}{fine.paid_at ? ` · Paid ${new Date(fine.paid_at).toLocaleDateString()}` : ""}</small></div><span className={`status ${fine.status}`}>{fine.status}</span></article>)}{loading && <LoadingState label="Loading your fines…" />}{!loading && !loadError && fines.length === 0 && <p className="empty" role="status">You do not have any fines.</p>}</div></section>
   </>;
 }
 
@@ -1709,6 +1893,11 @@ export default function App() {
   const [selectedBook, setSelectedBook] = useState(null);
   const [notice, setNotice] = useState(null);
   const [loading, setLoading] = useState(true);
+  const menuToggleRef = useRef(null);
+  const drawerCloseRef = useRef(null);
+  const sidebarRef = useRef(null);
+  const routeHeadingRef = useRef(null);
+  const lastRouteRef = useRef({ tab, userKey: null });
 
   useEffect(() => {
     api("/csrf/")
@@ -1724,12 +1913,45 @@ export default function App() {
 
   useEffect(() => {
     if (!menuOpen) return;
-    const closeOnEscape = (event) => { if (event.key === "Escape") setMenuOpen(false); };
+    drawerCloseRef.current?.focus();
+    const handleDrawerKeys = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setMenuOpen(false);
+        window.requestAnimationFrame(() => menuToggleRef.current?.focus());
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = [...(sidebarRef.current?.querySelectorAll("a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])") || [])].filter((element) => element.getClientRects().length);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && (document.activeElement === first || !sidebarRef.current?.contains(document.activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !sidebarRef.current?.contains(document.activeElement))) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    document.addEventListener("keydown", closeOnEscape);
-    return () => { document.body.style.overflow = previousOverflow; document.removeEventListener("keydown", closeOnEscape); };
+    document.addEventListener("keydown", handleDrawerKeys);
+    return () => { document.body.style.overflow = previousOverflow; document.removeEventListener("keydown", handleDrawerKeys); };
   }, [menuOpen]);
+
+  useEffect(() => {
+    const userKey = user?.login_id || user?.student_id || user?.id || null;
+    if (user && (lastRouteRef.current.tab !== tab || lastRouteRef.current.userKey !== userKey)) {
+      routeHeadingRef.current?.focus({ preventScroll: true });
+    }
+    lastRouteRef.current = { tab, userKey };
+  }, [tab, user]);
+
+  function closeMobileMenu() {
+    setMenuOpen(false);
+    window.requestAnimationFrame(() => menuToggleRef.current?.focus());
+  }
 
   async function signIn(values) {
     const result = await api("/auth/login/", { method: "POST", body: formBody(values) });
@@ -1769,7 +1991,7 @@ export default function App() {
   }
 
   if (loading) return <Preloader />;
-  if (!user) return <><AuthScreen onLogin={signIn} onSetup={setup} onSignup={signup} setupAvailable={setupAvailable} />{notice && <div className={`toast ${notice.kind}`}>{notice.text}</div>}<Chatbot user={null} /></>;
+  if (!user) return <><AuthScreen onLogin={signIn} onSetup={setup} onSignup={signup} setupAvailable={setupAvailable} />{notice && <div className={`toast ${notice.kind}`} role={notice.kind === "error" ? "alert" : "status"} aria-live={notice.kind === "error" ? "assertive" : "polite"}>{notice.text}<button type="button" aria-label="Dismiss notification" onClick={() => setNotice(null)}>×</button></div>}<Chatbot user={null} /></>;
 
   const isStudent = user.role === "student";
   const tabs = isStudent ? studentTabs : librarianTabs;
@@ -1780,35 +2002,35 @@ export default function App() {
   else if (isStudent && tab === "my_history") content = <TransactionsPage setNotice={setNotice} student />;
   else if (isStudent) content = <StudentPortal key={tab} user={user} tab={tab} setTab={setTab} setNotice={setNotice} selectedBook={selectedBook} onOpenBook={(book) => { setSelectedBook(book); setTab("student_book"); }} onBackToBooks={() => setTab("catalogue")} onBookRatingChange={(ratings) => setSelectedBook((book) => book ? { ...book, ...ratings } : book)} />;
   else if (tab === "overview") content = <Dashboard setNotice={setNotice} onNavigate={setTab} />;
-  else if (tab === "books") content = <BooksPage setNotice={setNotice} onAddBook={() => setTab("add_book")} onOpenBook={(book) => { setSelectedBook(book); setTab("book_detail"); }} />;
+  else if (tab === "books") content = <BooksPage onAddBook={() => setTab("add_book")} onOpenBook={(book) => { setSelectedBook(book); setTab("book_detail"); }} />;
   else if (tab === "add_book") content = <AddBookPage setNotice={setNotice} onCancel={() => setTab("books")} onSaved={(book) => { setSelectedBook(book); setTab("book_detail"); }} />;
   else if (tab === "edit_book" && selectedBook) content = <AddBookPage key={`edit-${selectedBook.id}`} book={selectedBook} setNotice={setNotice} onCancel={() => setTab("book_detail")} onSaved={(book) => { setSelectedBook(book); setTab("book_detail"); }} />;
-  else if (tab === "book_detail" && selectedBook) content = <BookDetailPage key={selectedBook.id} book={selectedBook} setNotice={setNotice} onBack={() => setTab("books")} onEdit={(book) => { setSelectedBook(book); setTab("edit_book"); }} />;
-  else if (tab === "book_detail") content = <BooksPage setNotice={setNotice} onAddBook={() => setTab("add_book")} onOpenBook={(book) => { setSelectedBook(book); setTab("book_detail"); }} />;
+  else if (tab === "book_detail" && selectedBook) content = <BookDetailPage key={selectedBook.id} book={selectedBook} onBack={() => setTab("books")} onEdit={(book) => { setSelectedBook(book); setTab("edit_book"); }} />;
+  else if (tab === "book_detail") content = <BooksPage onAddBook={() => setTab("add_book")} onOpenBook={(book) => { setSelectedBook(book); setTab("book_detail"); }} />;
   else if (tab === "requests") content = <RequestsPage setNotice={setNotice} />;
   else if (tab === "space_bookings") content = <LibrarianSpaceBookingsPage setNotice={setNotice} />;
-  else if (tab === "reservations") content = <ReservationsPage setNotice={setNotice} />;
+  else if (tab === "reservations") content = <ReservationsPage />;
   else if (tab === "renewals") content = <RenewalsPage setNotice={setNotice} />;
   else if (tab === "transactions") content = <TransactionsPage setNotice={setNotice} />;
-  else if (tab === "reports") content = <ReportsPage setNotice={setNotice} />;
-  else if (tab === "students") content = <StudentsPage setNotice={setNotice} onAddFine={(member) => { setFineMemberId(member.id); setTab("fines"); window.scrollTo({ top: 0 }); }} />;
+  else if (tab === "reports") content = <ReportsPage />;
+  else if (tab === "students") content = <StudentsPage onAddFine={(member) => { setFineMemberId(member.id); setTab("fines"); window.scrollTo({ top: 0 }); }} />;
   else if (tab === "loans") content = <LoansPage setNotice={setNotice} />;
   else if (tab === "fines") content = <FinesPage key={fineMemberId} setNotice={setNotice} initialMemberId={fineMemberId} />;
   else content = <ReviewsPage setNotice={setNotice} />;
 
   return <div className={`app-shell ${isStudent ? "student-shell" : ""} ${menuOpen ? "menu-open" : ""}`}>
     <a className="skip-link" href="#portal-content">Skip to content</a>
-    {menuOpen && <button className="nav-backdrop" aria-label="Close navigation" onClick={() => setMenuOpen(false)} />}
-    <aside className="sidebar" id="portal-navigation">
-      <button className="drawer-close" type="button" aria-label="Close navigation" onClick={() => setMenuOpen(false)}><X size={20} /></button>
+    {menuOpen && <button className="nav-backdrop" type="button" aria-label="Close navigation" onClick={closeMobileMenu} />}
+    <aside className="sidebar" id="portal-navigation" ref={sidebarRef} role={menuOpen ? "dialog" : undefined} aria-modal={menuOpen ? "true" : undefined} aria-label={menuOpen ? "Portal navigation" : undefined}>
+      <button className="drawer-close" type="button" aria-label="Close navigation" ref={drawerCloseRef} onClick={closeMobileMenu}><X size={20} aria-hidden="true" /></button>
       <div className="sidebar-brand"><img src="/assets/campusshelf-logo.svg" alt="" /><div><b>CampusShelf</b><small>{isStudent ? "STUDENT PORTAL" : "LIBRARIAN DESK"}</small></div></div>
       <div className="sidebar-label">{isStudent ? "YOUR LIBRARY" : "WORKSPACE"}</div>
-      <nav aria-label={isStudent ? "Student portal" : "Librarian workspace"}>{tabs.map(([key, label, icon]) => <button className={activeTab === key ? "active" : ""} key={key} aria-current={activeTab === key ? "page" : undefined} onClick={() => { setTab(key); setMenuOpen(false); window.scrollTo({ top: 0 }); }}><NavIcon name={icon} /><span>{label}</span>{activeTab === key && <span className="nav-active-dot" />}</button>)}</nav>
+      <nav aria-label={isStudent ? "Student portal" : "Librarian workspace"}>{tabs.map(([key, label, icon]) => <button type="button" className={activeTab === key ? "active" : ""} key={key} aria-current={activeTab === key ? "page" : undefined} onClick={() => { setTab(key); setMenuOpen(false); window.scrollTo({ top: 0 }); window.requestAnimationFrame(() => routeHeadingRef.current?.focus({ preventScroll: true })); }}><NavIcon name={icon} /><span>{label}</span>{activeTab === key && <span className="nav-active-dot" aria-hidden="true" />}</button>)}</nav>
       {!isStudent && <div className="sidebar-help"><span className="eyebrow">QUICK NOTE</span><p>Scan the label on the physical copy, not the book cover.</p><a href="/admin/">Open Django Admin ↗</a></div>}
       <div className="sidebar-user"><div className="avatar">{user.name.slice(0, 1).toUpperCase()}</div><div><b>{user.name}</b><small>{isStudent ? user.student_id : user.login_id}</small></div></div>
     </aside>
-    <main className="main-area"><header className="topbar"><button className="menu-toggle" type="button" aria-label={menuOpen ? "Close navigation" : "Open navigation"} aria-expanded={menuOpen} aria-controls="portal-navigation" onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X size={21} /> : <Menu size={21} />}</button><div><span className="eyebrow">{isStudent ? "STUDENT PORTAL" : "LIBRARIAN WORKSPACE"}</span><h1>{active[1]}</h1></div><div className="topbar-right"><span className="portal-chip">{isStudent ? "Reader account" : "Library staff"}</span><span className="top-date">{new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</span><button className="signout-button" type="button" onClick={signOut}>Sign out</button></div></header>
-      {notice && <div className={`notice ${notice.kind}`} role="status">{notice.text}<button aria-label="Dismiss notification" onClick={() => setNotice(null)}>×</button></div>}
+    <main className="main-area" aria-hidden={menuOpen || undefined} inert={menuOpen || undefined}><header className="topbar"><button ref={menuToggleRef} className="menu-toggle" type="button" aria-label={menuOpen ? "Close navigation" : "Open navigation"} aria-expanded={menuOpen} aria-controls="portal-navigation" onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X size={21} aria-hidden="true" /> : <Menu size={21} aria-hidden="true" />}</button><div><span className="eyebrow">{isStudent ? "STUDENT PORTAL" : "LIBRARIAN WORKSPACE"}</span><h1 ref={routeHeadingRef} tabIndex={-1}>{active[1]}</h1></div><div className="topbar-right"><span className="portal-chip">{isStudent ? "Reader account" : "Library staff"}</span><span className="top-date"><time dateTime={new Date().toISOString().slice(0, 10)}>{new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</time></span><button className="signout-button" type="button" onClick={signOut}>Sign out</button></div></header>
+      {notice && <div className={`notice ${notice.kind}`} role={notice.kind === "error" ? "alert" : "status"} aria-live={notice.kind === "error" ? "assertive" : "polite"}>{notice.text}<button type="button" aria-label="Dismiss notification" onClick={() => setNotice(null)}>×</button></div>}
       <LazyMotion features={domAnimation}><AnimatePresence mode="wait" initial={false}><m.div id="portal-content" tabIndex={-1} className="page-content" key={tab + (selectedBook?.id || "")} initial={reducedMotion ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: reducedMotion ? 0 : -6 }} transition={{ duration: reducedMotion ? 0 : .2 }}>{content}</m.div></AnimatePresence></LazyMotion>
     </main>
     <Chatbot user={user} />

@@ -3,7 +3,7 @@ import { QRCodeSVG } from "qrcode.react";
 
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
 
-export default function CopyLabels({ copies, title, loading = false }) {
+export default function CopyLabels({ copies, title, loading = false, error = false }) {
   const [selected, setSelected] = useState([]);
   const selectedCopies = copies.filter((copy) => selected.includes(copy.id));
 
@@ -36,12 +36,12 @@ export default function CopyLabels({ copies, title, loading = false }) {
       <div className="button-line"><button type="button" className="button light" disabled={loading || !copies.length} onClick={() => printLabels(copies)}>Print all labels</button><button type="button" className="button primary" disabled={loading || !selectedCopies.length} onClick={() => printLabels(selectedCopies)}>Print selected ({selectedCopies.length})</button></div>
     </div>
     <p className="route-hint">Choose individual copies or select all. Each label prints on a separate page; the print dialog controls paper size.</p>
-    <div className="qr-grid copy-status-grid">{copies.map((copy) => <article id={`copy-label-${copy.id}`} className={`qr-card copy-status-card ${selected.includes(copy.id) ? "label-selected" : ""}`} key={copy.id}>
+    <div className="qr-grid copy-status-grid" aria-busy={loading}>{copies.map((copy) => <article id={`copy-label-${copy.id}`} className={`qr-card copy-status-card ${selected.includes(copy.id) ? "label-selected" : ""}`} key={copy.id}>
       <label className="label-checkbox"><input type="checkbox" checked={selected.includes(copy.id)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, copy.id] : current.filter((id) => id !== copy.id))} /><span>Select {copy.copy_id}</span></label>
       <QRCodeSVG value={copy.copy_id} size={116} marginSize={4} />
       <span>{copy.book_title || title}</span><b>{copy.copy_id}</b><span>Shelf {copy.shelf || "Unassigned"}</span><span className={`status ${copy.status}`}>{copy.status === "available" ? "Free to borrow" : "Allotted"}</span>
       <button className="button light small" type="button" onClick={() => printLabels([copy])}>Print this label</button>
     </article>)}</div>
-    {loading && <p className="empty">Loading copy labels…</p>}{!loading && !copies.length && <p className="empty">There are no physical copies to label yet.</p>}
+    {loading && <p className="route-loading" role="status" aria-live="polite">Loading copy labels…</p>}{!loading && !error && !copies.length && <p className="empty" role="status">There are no physical copies to label yet.</p>}
   </section>;
 }

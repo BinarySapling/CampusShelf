@@ -25,6 +25,8 @@ body { background: var(--paper); }
 ::selection { background: #f3c1aa; color: #172e35; }
 button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
 button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid #cf674a; outline-offset: 3px; }
+summary:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible { outline: 3px solid #cf674a; outline-offset: 3px; }
+h1[tabindex="-1"]:focus { outline: none; }
 button { touch-action: manipulation; }
 .eyebrow { color: #667a7a; font-size: 10px; letter-spacing: 1.6px; font-weight: 700; line-height: 1.5; }
 .muted { color: var(--muted); }
@@ -381,12 +383,75 @@ code { font: 10px "DM Mono", monospace; background: #f3f5f1; padding: 5px 7px; b
 @media (prefers-reduced-motion: reduce) {
   *, *:before, *:after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
+@media (forced-colors: active) {
+  button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid Highlight; }
+  .sidebar nav button.active { border: 1px solid Highlight; }
+  .status, .pill, .portal-chip { border: 1px solid currentColor; }
+}
+
+/* Generated library scenes and a little motion make the routes feel lived in. */
+.dashboard-hero { isolation: isolate; }
+.dashboard-hero-art { position: absolute; z-index: 0; inset: 0 0 0 auto; width: 65%; overflow: hidden; border-radius: inherit; }
+.dashboard-hero-art::after { position: absolute; inset: 0; background: linear-gradient(90deg, #172e35 0%, rgba(23, 46, 53, .94) 12%, rgba(23, 46, 53, .42) 53%, rgba(23, 46, 53, .08) 100%); content: ""; }
+.dashboard-hero-art img { width: 100%; height: 100%; object-fit: cover; object-position: 72% 54%; opacity: .97; animation: cs-library-drift 18s ease-in-out infinite alternate; }
+.dashboard-hero-copy, .dashboard-stamp { z-index: 2; }
+.dashboard-hero-copy { max-width: 58%; animation: gentle-enter .65s ease both; }
+.dashboard-stamp { animation: cs-stamp-float 6s ease-in-out infinite; }
+.stats-grid .stat-card:nth-child(5) { animation-delay: .2s; }
+.stats-grid .stat-card:nth-child(6) { animation-delay: .25s; }
+.stats-grid .stat-card:nth-child(7) { animation-delay: .3s; }
+.stat-card { transition: transform .22s ease, box-shadow .22s ease, border-color .22s ease; }
+.stat-card:hover { transform: translateY(-3px); border-color: #cbd8cb; box-shadow: 0 12px 28px #172e3510; }
+.student-welcome .welcome-illustration { animation: cs-stamp-float 6.5s ease-in-out infinite; }
+.space-booking-visual { position: relative; display: flex; min-height: 225px; align-items: center; overflow: hidden; margin: 0 0 22px; padding: 30px clamp(23px, 4vw, 46px); border-radius: 21px; isolation: isolate; background: #172e35; color: #fff8ef; box-shadow: 0 12px 30px #172e350c; }
+.space-booking-visual > img { position: absolute; z-index: -2; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 72% 57%; animation: cs-library-drift 20s ease-in-out infinite alternate-reverse; }
+.space-booking-visual::before { position: absolute; z-index: -1; inset: 0; background: linear-gradient(90deg, rgba(23, 46, 53, .96) 0%, rgba(23, 46, 53, .87) 34%, rgba(23, 46, 53, .38) 70%, rgba(23, 46, 53, .12) 100%); content: ""; }
+.space-booking-visual-copy { max-width: 510px; animation: gentle-enter .6s ease both; }
+.space-booking-visual-copy .eyebrow { color: #edc4a6; }
+.space-booking-visual-copy h2 { margin: 0 0 9px; font: 400 clamp(31px, 3vw, 43px)/1.05 var(--display); letter-spacing: -.7px; }
+.space-booking-visual-copy p { max-width: 430px; margin: 0; color: #e4e6db; font-size: 12px; line-height: 1.7; }
+.space-booking-visual-note { position: absolute; right: 23px; bottom: 19px; color: #fff7ebd9; font: 700 8px "DM Mono", monospace; letter-spacing: 1.5px; }
+@keyframes cs-library-drift { from { transform: scale(1.02) translate3d(0, 0, 0); } to { transform: scale(1.08) translate3d(-.4%, .5%, 0); } }
+@keyframes cs-stamp-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+@media (max-width: 760px) {
+  .dashboard-hero { min-height: 255px; }
+  .dashboard-hero-art { width: 100%; }
+  .dashboard-hero-art::after { background: linear-gradient(90deg, rgba(23, 46, 53, .94) 0%, rgba(23, 46, 53, .78) 55%, rgba(23, 46, 53, .32) 100%); }
+  .dashboard-hero-copy { max-width: 84%; }
+  .space-booking-visual { min-height: 225px; padding: 23px; border-radius: 18px; }
+  .space-booking-visual > img { object-position: 70% center; }
+  .space-booking-visual::before { background: linear-gradient(90deg, rgba(23, 46, 53, .95), rgba(23, 46, 53, .72) 67%, rgba(23, 46, 53, .35)); }
+  .space-booking-visual-copy { max-width: 82%; }
+  .space-booking-visual-copy h2 { font-size: 34px; }
+  .space-booking-visual-copy p { font-size: 11px; }
+  .space-booking-visual-note { right: 15px; bottom: 13px; font-size: 7px; }
+}
+@media (max-width: 420px) {
+  .dashboard-hero-copy { max-width: 100%; }
+  .space-booking-visual-copy { max-width: 100%; }
+  .space-booking-visual-note { display: none; }
+}
 @media print {
   .menu-toggle, .nav-backdrop, .skip-link, .cs-chatbot-root { display: none !important; }
   .main-area { width: 100%; margin: 0; padding: 0; }
   .page-content { opacity: 1 !important; transform: none !important; }
 }
 .drawer-close { display: none; }
+.route-load-error { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin: 0 0 18px; padding: 16px 18px; border: 1px solid #d99a91; border-radius: 12px; background: #fff3f0; color: #632d2e; }
+.route-load-error strong { display: block; margin-bottom: 4px; font-size: 13px; }
+.route-load-error p { margin: 0; color: #764545; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.route-load-error .button { flex: 0 0 auto; }
+.route-loading { min-height: 48px; display: flex; align-items: center; gap: 10px; color: #536c65; font-size: 12px; }
+.route-loading::before { content: ""; width: 14px; height: 14px; border: 2px solid #cad7d0; border-top-color: #244f4d; border-radius: 50%; animation: route-spin .75s linear infinite; }
+.sr-only { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
+@keyframes route-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .route-loading::before { animation: none; border-top-color: #244f4d; } }
+@media (max-width: 760px) {
+  .route-load-error { align-items: flex-start; flex-direction: column; }
+  .route-load-error .button { width: 100%; }
+  .booking-modal-overlay { padding: 10px; align-items: end; }
+  .booking-modal { width: 100%; max-height: min(90dvh, 760px); overflow-y: auto; overscroll-behavior: contain; }
+}
 .report-rank b { font-size: 13px; }
 .report-rank > span, .report-rank > strong { font-size: 13px; }
 .circulation-month small, .chart-legend { font-size: 11px; }
