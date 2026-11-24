@@ -559,7 +559,7 @@ function FinesPage({ setNotice, initialMemberId = "" }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [busy, setBusy] = useState(false);
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
     setLoadError("");
     try {
@@ -571,8 +571,8 @@ function FinesPage({ setNotice, initialMemberId = "" }) {
     } finally {
       setLoading(false);
     }
-  }
-  useEffect(() => { load(); }, []);
+  }, []);
+  useEffect(() => { load(); }, [load]);
 
   async function addFine(event) {
     event.preventDefault();
@@ -682,7 +682,7 @@ function ReviewsPage({ setNotice }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [busy, setBusy] = useState(false);
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
     setLoadError("");
     try {
@@ -695,8 +695,8 @@ function ReviewsPage({ setNotice }) {
     } finally {
       setLoading(false);
     }
-  }
-  useEffect(() => { load(); }, []);
+  }, []);
+  useEffect(() => { load(); }, [load]);
   async function submit(event) {
     event.preventDefault();
     const form = event.currentTarget;
@@ -742,7 +742,7 @@ function StudentBookReviews({ book, setNotice, onRatingChange }) {
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState(null);
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
     setLoadError("");
     try {
@@ -760,9 +760,9 @@ function StudentBookReviews({ book, setNotice, onRatingChange }) {
     } finally {
       setLoading(false);
     }
-  }
+  }, [book.id, onRatingChange]);
 
-  useEffect(() => { load().catch(() => {}); }, [book.id]);
+  useEffect(() => { load().catch(() => {}); }, [load]);
 
   async function submit(event) {
     event.preventDefault();
@@ -832,14 +832,14 @@ function ReservationsPage() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
     setLoadError("");
     try { setItems((await api("/reservations/")).results); }
     catch (error) { setLoadError(error.message); }
     finally { setLoading(false); }
-  }
-  useEffect(() => { load(); }, []);
+  }, []);
+  useEffect(() => { load(); }, [load]);
   return <>
     <PageTitle eyebrow="CIRCULATION / HOLDS" title="Book reservations" note="A copy returning to the shelf is assigned to the next student in line." action={<button className="button light" disabled={loading} onClick={load}>{loading ? "Refreshing…" : "Refresh queue"}</button>} />
     {loadError && <LoadError message={loadError} onRetry={load} />}
@@ -852,14 +852,14 @@ function RenewalsPage({ setNotice }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [busyId, setBusyId] = useState("");
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
     setLoadError("");
     try { setItems((await api("/renewals/")).results); }
     catch (error) { setLoadError(error.message); }
     finally { setLoading(false); }
-  }
-  useEffect(() => { load(); }, []);
+  }, []);
+  useEffect(() => { load(); }, [load]);
   async function review(item, action) {
     setBusyId(item.id);
     try {
@@ -880,14 +880,14 @@ function ReportsPage() {
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
     setLoadError("");
     try { setReport(await api("/reports/")); }
     catch (error) { setLoadError(error.message); }
     finally { setLoading(false); }
-  }
-  useEffect(() => { load(); }, []);
+  }, []);
+  useEffect(() => { load(); }, [load]);
   const maxPopular = Math.max(1, ...(report?.popular_books || []).map((item) => item.borrowings));
   const maxMonth = Math.max(1, ...(report?.circulation || []).flatMap((item) => [item.issues, item.returns]));
   return <>
@@ -933,7 +933,7 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
   const [cancellingId, setCancellingId] = useState("");
   useAccessibleDialog(Boolean(bookingModal), bookingDialogRef, () => !submitting && setBookingModal(null));
 
-  async function loadData() {
+  const loadData = useCallback(async () => {
     const sequence = ++requestSequence.current;
     setLoading(true);
     setLoadError("");
@@ -950,11 +950,9 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
     } finally {
       if (sequence === requestSequence.current) setLoading(false);
     }
-  }
-
-  useEffect(() => {
-    loadData();
   }, [selectedDate]);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   function openBookingModal(space, presetSlot = null) {
     setModalError("");
@@ -1435,7 +1433,7 @@ function LibrarianSpaceBookingsPage({ setNotice }) {
   const [rejectReason, setRejectReason] = useState("");
   useAccessibleDialog(Boolean(rejectingBooking), rejectDialogRef, () => setRejectingBooking(null));
 
-  async function loadData() {
+  const loadData = useCallback(async () => {
     const sequence = ++requestSequence.current;
     setLoading(true);
     setLoadError("");
@@ -1455,11 +1453,9 @@ function LibrarianSpaceBookingsPage({ setNotice }) {
     } finally {
       if (sequence === requestSequence.current) setLoading(false);
     }
-  }
-
-  useEffect(() => {
-    loadData();
   }, [dateFilter, scheduleDate]);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   async function review(booking, action, reason = "") {
     setBusyId(booking.id);
@@ -1747,7 +1743,7 @@ function StudentPortal({ user, tab, setTab, setNotice, selectedBook, onOpenBook,
   const [scanOpen, setScanOpen] = useState(false);
   const [slip, setSlip] = useState(null);
 
-  async function load() {
+  const load = useCallback(async () => {
     const sequence = ++loadSequence.current;
     setLoading(true);
     setLoadError("");
@@ -1769,8 +1765,8 @@ function StudentPortal({ user, tab, setTab, setNotice, selectedBook, onOpenBook,
     } finally {
       if (sequence === loadSequence.current) setLoading(false);
     }
-  }
-  useEffect(() => { load(); }, [tab]);
+  }, [tab]);
+  useEffect(() => { load(); }, [load]);
 
   async function scanned(value) {
     setScanOpen(false);
@@ -1893,6 +1889,9 @@ export default function App() {
   const [selectedBook, setSelectedBook] = useState(null);
   const [notice, setNotice] = useState(null);
   const [loading, setLoading] = useState(true);
+  const handleBookRatingChange = useCallback((ratings) => {
+    setSelectedBook((book) => book ? { ...book, ...ratings } : book);
+  }, []);
   const menuToggleRef = useRef(null);
   const drawerCloseRef = useRef(null);
   const sidebarRef = useRef(null);
@@ -2000,7 +1999,7 @@ export default function App() {
   let content;
   if (tab === "account") content = <AccountPage user={user} setNotice={setNotice} />;
   else if (isStudent && tab === "my_history") content = <TransactionsPage setNotice={setNotice} student />;
-  else if (isStudent) content = <StudentPortal key={tab} user={user} tab={tab} setTab={setTab} setNotice={setNotice} selectedBook={selectedBook} onOpenBook={(book) => { setSelectedBook(book); setTab("student_book"); }} onBackToBooks={() => setTab("catalogue")} onBookRatingChange={(ratings) => setSelectedBook((book) => book ? { ...book, ...ratings } : book)} />;
+  else if (isStudent) content = <StudentPortal key={tab} user={user} tab={tab} setTab={setTab} setNotice={setNotice} selectedBook={selectedBook} onOpenBook={(book) => { setSelectedBook(book); setTab("student_book"); }} onBackToBooks={() => setTab("catalogue")} onBookRatingChange={handleBookRatingChange} />;
   else if (tab === "overview") content = <Dashboard setNotice={setNotice} onNavigate={setTab} />;
   else if (tab === "books") content = <BooksPage onAddBook={() => setTab("add_book")} onOpenBook={(book) => { setSelectedBook(book); setTab("book_detail"); }} />;
   else if (tab === "add_book") content = <AddBookPage setNotice={setNotice} onCancel={() => setTab("books")} onSaved={(book) => { setSelectedBook(book); setTab("book_detail"); }} />;
