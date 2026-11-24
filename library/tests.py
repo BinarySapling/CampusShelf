@@ -859,6 +859,39 @@ class CampusShelfFeatureApiTests(TestCase):
         allowed = csrf_client.post("/api/signup/", values, HTTP_X_CSRFTOKEN=token)
         self.assertEqual(allowed.status_code, 201)
 
+    def test_catalogue_checkbox_filters_sort_and_pagination_combine(self):
+        fiction = Book.objects.create(title="A Fiction Book", author="Zed Author", category="Fiction",
+            shelf="FILTER-SHELF", isbn="9781234567897", cover_url="https://example.com/cover.jpg")
+        BookCopy.objects.create(book=fiction, copy_id=copy_code_for(fiction.pk), shelf=fiction.shelf)
+        Review.objects.create(book=fiction, book_title=fiction.title, member_name="Reader", rating=5, comment="Excellent")
+        response = self.client.get("/api/catalogue/", {"category": ["Fiction", "Technology"],
+            "availability": ["available", "unavailable"], "page_size": 1, "sort": "title_desc"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["pagination"]["total"], 2)
+        self.assertEqual(response.json()["results"][0]["id"], str(self.book.pk))
+        second = self.client.get("/api/catalogue/", {"category": ["Fiction", "Technology"], "sort": "title_desc", "page": 2, "page_size": 1})
+        self.assertEqual(second.json()["results"][0]["id"], str(fiction.pk))
+        for term in ["9781234567897", "FILTER-SHELF"]:
+            found = self.client.get("/api/catalogue/", {"q": term}).json()["results"]
+            self.assertEqual([item["id"] for item in found], [str(fiction.pk)])
+        rated = self.client.get("/api/catalogue/", {"min_rating": 4, "with_cover": "1", "sort": "rating"}).json()
+        self.assertEqual(rated["pagination"]["total"], 1)
+        self.assertEqual(rated["results"][0]["id"], str(fiction.pk))
+        self.assertEqual(self.client.get("/api/catalogue/", {"category": "Missing"}).json()["pagination"]["total"], 0)
+
+    def test_transaction_type_checkboxes_filter_before_pagination_and_keep_student_scope(self):
+        member, student = self.make_student("FILTER")
+        other, _ = self.make_student("OTHERFILTER")
+        for person in [member, other]:
+            FineEntry.objects.create(member=person, member_name=person.name, student_id=person.student_id,
+                amount=25, fine_type=FineEntry.CUSTOM, reason="Filter test", status=FineEntry.PAID, paid_at=timezone.now())
+        response = student.get("/api/student/transactions/", {"type": ["fine_added", "fine_paid"], "page_size": 1})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["pagination"]["total"], 2)
+        self.assertEqual(response.json()["results"][0]["student_id"], member.student_id)
+        invalid = self.staff_client.get("/api/transactions/", {"type": ["fine_added", "invalid"]})
+        self.assertEqual(invalid.status_code, 400)
+
     def test_catalogue_supports_category_availability_and_page_filters(self):
         other_book = Book.objects.create(
             title="Available Fiction",

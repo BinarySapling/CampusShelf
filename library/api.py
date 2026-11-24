@@ -208,13 +208,24 @@ def borrowing_data(record):
 
 
 def paginated_books(request, queryset):
-    query = request.GET.get("q", "").strip()
-    category = request.GET.get("category", "").strip()
-    availability = request.GET.get("availability", "all").strip()
+    query = request.GET.get("q", "").strip()[:150]
+    categories = [value.strip() for value in request.GET.getlist("category") if value.strip()][:50]
+    availability = set(request.GET.getlist("availability")) & {"available", "unavailable"}
+    sort = request.GET.get("sort", "title")
+    ordering = {"title": ("title", "pk"), "title_desc": ("-title", "pk"),
+                "author": ("author", "title", "pk"), "newest": ("-created_at", "pk")}
     if query:
-        queryset = queryset.filter(Q(title__icontains=query) | Q(author__icontains=query))
-    if category:
-        queryset = queryset.filter(category=category)
+        queryset = queryset.filter(Q(title__icontains=query) | Q(author__icontains=query)
+            | Q(isbn__icontains=query) | Q(shelf__icontains=query))
+    if categories:
+        queryset = queryset.filter(category__in=categories)
+    if request.GET.get("with_cover") == "1":
+        queryset = queryset.exclude(cover_url="").exclude(cover_url__isnull=True)
+    queryset = queryset.order_by(*ordering.get(sort, ordering["title"]))
+    try:
+        min_rating = min(5, max(0, float(request.GET.get("min_rating", "0"))))
+    except ValueError:
+        min_rating = 0
     try:
         page_number = max(1, int(request.GET.get("page", "1")))
     except ValueError:
@@ -223,7 +234,8 @@ def paginated_books(request, queryset):
         page_size = min(100, max(1, int(request.GET.get("page_size", "24"))))
     except ValueError:
         page_size = 24
-    if availability not in ("available", "unavailable"):
+    needs_full_results = len(availability) == 1 or min_rating > 0 or sort == "rating"
+    if not needs_full_results:
         total = queryset.count()
         pages = max(1, (total + page_size - 1) // page_size)
         page_number = min(page_number, pages)
@@ -235,21 +247,22 @@ def paginated_books(request, queryset):
         books = list(queryset)
         ratings = book_ratings_for_books(books)
         results = [book_data(book, ratings[str(book.pk)]) for book in books]
-        if availability == "available":
+        if availability == {"available"}:
             results = [book for book in results if book["available_to_borrow"] > 0]
-        else:
+        elif availability == {"unavailable"}:
             results = [book for book in results if book["available_to_borrow"] == 0]
+        if min_rating:
+            results = [book for book in results if book["rating_count"] > 0 and book["average_rating"] >= min_rating]
+        if sort == "rating":
+            results.sort(key=lambda book: (-book["average_rating"], -book["rating_count"], book["title"], book["id"]))
         total = len(results)
         pages = max(1, (total + page_size - 1) // page_size)
         page_number = min(page_number, pages)
         start = (page_number - 1) * page_size
         results = results[start:start + page_size]
-    categories = sorted(set(Book.objects.exclude(category="").values_list("category", flat=True)))
-    return JsonResponse({
-        "results": results,
-        "categories": categories,
-        "pagination": {"page": page_number, "page_size": page_size, "total": total, "pages": pages},
-    })
+    category_choices = sorted(set(Book.objects.exclude(category="").values_list("category", flat=True)))
+    return JsonResponse({"results": results, "categories": category_choices,
+        "pagination": {"page": page_number, "page_size": page_size, "total": total, "pages": pages}})
 
 
 def fine_data(entry):
@@ -850,8 +863,9 @@ TRANSACTION_TYPES = {"checkout", "return", "renewal", "fine_added", "fine_paid"}
 
 def transaction_history(request, member=None):
     query = request.GET.get("q", "").strip()[:100]
-    event_type = request.GET.get("type", "").strip()
-    if event_type and event_type not in TRANSACTION_TYPES:
+    event_types = {value.strip() for value in request.GET.getlist("type") if value.strip()}
+    event_type = next(iter(event_types)) if len(event_types) == 1 else ""
+    if not event_types.issubset(TRANSACTION_TYPES):
         return JsonResponse({"error": "Choose a valid transaction type."}, status=400)
 
     events = []
@@ -969,6 +983,8 @@ def transaction_history(request, member=None):
                     "amount": str(fine.amount),
                 })
 
+    if event_types:
+        events = [item for item in events if item["type"] in event_types]
     events.sort(key=lambda item: datetime.fromisoformat(item["occurred_at"]).timestamp(), reverse=True)
     try:
         page = max(1, int(request.GET.get("page", "1")))

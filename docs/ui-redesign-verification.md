@@ -26,3 +26,13 @@ These checks cover the React portals and their existing APIs. Camera hardware sc
 - Mobile search picker checked at 390px without document overflow.
 - Production build passed; production dependency audit reported zero vulnerabilities.
 - Fine removal is librarian-only and applies to recorded unpaid fines. Paid receipts remain intact. Live overdue amounts must be finalised by returning the book first.
+
+## Search and filtering update
+
+- Added shared catalogue search with multiple category and availability checkboxes, rating/cover filters, sorting, page size, active filter chips, and reset/empty/error states.
+- Catalogue queries search title, author, ISBN, and shelf. Combined filters apply before pagination; stale catalogue requests are cancelled.
+- Added checkbox filters to activity history, student directory, fine ledger, student space discovery, and librarian booking requests.
+- Students now have an Add fine action that opens the existing fine-entry form with their account selected.
+- 43 backend tests passed, including combined catalogue filters/sort/pagination and multi-type transaction filtering with student isolation.
+- Browser checks passed for category union, both availability choices, pagination reset, clear/remove filters, shelf search, no matches, student/librarian filters, and preselected fine submission using disposable local data.
+- Desktop and 390px mobile layouts checked without horizontal overflow. Final browser console showed no errors.

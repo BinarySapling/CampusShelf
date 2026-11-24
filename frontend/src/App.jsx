@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { api, formBody } from "./api.js";
 import Scanner from "./Scanner.jsx";
@@ -7,6 +7,8 @@ import LibraryArt from "./LibraryArt.jsx";
 import Preloader from "./Preloader.jsx";
 import CopyLabels from "./CopyLabels.jsx";
 import SearchPicker from "./SearchPicker.jsx";
+import CatalogueExplorer from "./CatalogueExplorer.jsx";
+import { ActiveFilters, CheckboxGroup, RecordFilters, filterRows } from "./Filters.jsx";
 import { AnimatePresence, LazyMotion, domAnimation, m, useReducedMotion } from "motion/react";
 import { BookOpen, CalendarDays, ChartNoAxesCombined, CircleUserRound, ClipboardList, LayoutDashboard, LibraryBig, MapPin, Menu, Plus, Receipt, Repeat2, Sparkles, Star, Users, X } from "lucide-react";
 
@@ -170,55 +172,20 @@ function Dashboard({ setNotice, onNavigate }) {
   </>;
 }
 
+function CatalogueTile({ book, onOpen }) {
+  return <button type="button" className="catalogue-card book-tile" onClick={() => onOpen(book)}><BookCover book={book} /><span className="eyebrow">{book.category}</span><h3>{book.title}</h3><p>{book.author}</p><BookRating rating={book.average_rating} count={book.rating_count} /><div className="catalogue-footer"><span>{book.available_to_borrow} / {book.total} copies free</span><small>Shelf {book.shelf || "Unassigned"}</small></div><span className="book-tile-link">View title <span aria-hidden="true">↗</span></span></button>;
+}
+
 function BooksPage({ setNotice, onAddBook, onOpenBook }) {
-  const [books, setBooks] = useState([]);
   const [copies, setCopies] = useState(null);
-  const [search, setSearch] = useState("");
-  const [category, setCategory] = useState("");
-  const [availability, setAvailability] = useState("all");
-  const [categories, setCategories] = useState([]);
-  const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 });
-  const [loading, setLoading] = useState(true);
-
-  async function loadBooks(query = search, page = 1, selectedCategory = category, selectedAvailability = availability) {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams({ q: query, page: String(page), category: selectedCategory, availability: selectedAvailability });
-      const result = await api(`/books/?${params}`);
-      setBooks(result.results);
-      setCategories(result.categories || []);
-      setPagination(result.pagination);
-    } finally {
-      setLoading(false);
-    }
-  }
-  useEffect(() => { loadBooks(search, 1, category, availability).catch((error) => noticeText(setNotice, error.message, "error")); }, []);
-
   async function showAllCopies() {
-    try {
-      const result = await api("/books/copies/");
-      setCopies({ title: "All book copies", results: result.results });
-    } catch (error) {
-      noticeText(setNotice, error.message, "error");
-    }
+    try { const result = await api("/books/copies/"); setCopies(result.results); }
+    catch (error) { noticeText(setNotice, error.message, "error"); }
   }
-
   return <>
-    <PageTitle eyebrow="COLLECTION / SEARCH" title="Find a title" note="Search the shelves, then open a title to see every copy and its status." action={<button className="button primary" onClick={onAddBook}>＋ Add a book</button>} />
-    <section className="panel search-panel">
-      <div className="panel-head"><div><span className="eyebrow">LIBRARY CATALOGUE</span><h3>Search books and authors</h3></div><button className="button light small" type="button" onClick={showAllCopies}>Choose QR labels to print</button></div>
-      <form className="search-row" onSubmit={(event) => { event.preventDefault(); loadBooks(search, 1).catch((error) => noticeText(setNotice, error.message, "error")); }}><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Type a title or author" /><button className="button light" disabled={loading}>{loading ? "Loading…" : "Search"}</button></form>
-      <div className="catalogue-filters"><label>Category<select value={category} onChange={(event) => { const value = event.target.value; setCategory(value); loadBooks(search, 1, value, availability).catch((error) => noticeText(setNotice, error.message, "error")); }}><option value="">All categories</option>{categories.map((item) => <option key={item} value={item}>{item}</option>)}</select></label><label>Availability<select value={availability} onChange={(event) => { const value = event.target.value; setAvailability(value); loadBooks(search, 1, category, value).catch((error) => noticeText(setNotice, error.message, "error")); }}><option value="all">Any status</option><option value="available">Available to borrow</option><option value="unavailable">Unavailable</option></select></label></div>
-      <p className="route-hint">{loading ? "Loading the collection…" : `${pagination.total} title${pagination.total === 1 ? "" : "s"} · Select a book to edit details or open its copy labels.`}</p>
-      <div className="catalogue-grid book-catalogue-grid">{books.map((book) => <button type="button" className="catalogue-card book-tile" key={book.id} onClick={() => onOpenBook(book)}>
-        <BookCover book={book} />
-        <span className="eyebrow">{book.category}</span><h3>{book.title}</h3><p>{book.author}</p><BookRating rating={book.average_rating} count={book.rating_count} />
-        <div className="catalogue-footer"><span>{book.available_to_borrow} / {book.total} copies free</span><small>Shelf {book.shelf || "Unassigned"}</small></div>
-        <span className="book-tile-link">Open copies →</span>
-      </button>)}{loading && <p className="empty">Loading titles…</p>}{!loading && books.length === 0 && <p className="empty">No titles found. Try another search or add a new book.</p>}</div>
-      <div className="pagination-controls"><span>Page {pagination.page} of {pagination.pages}</span><div><button className="button light small" disabled={loading || pagination.page <= 1} onClick={() => loadBooks(search, pagination.page - 1).catch((error) => noticeText(setNotice, error.message, "error"))}>← Previous</button><button className="button light small" disabled={loading || pagination.page >= pagination.pages} onClick={() => loadBooks(search, pagination.page + 1).catch((error) => noticeText(setNotice, error.message, "error"))}>Next →</button></div></div>
-    </section>
-    {copies && <CopyLabels copies={copies.results} title={copies.title} />}
+    <PageTitle eyebrow="COLLECTION / SEARCH" title="Find a title" note="Search, combine filters, and open a title to explore its copies." action={<button className="button primary" onClick={onAddBook}>＋ Add a book</button>} />
+    <CatalogueExplorer path="/books/" renderBook={(book) => <CatalogueTile key={book.id} book={book} onOpen={onOpenBook} />} action={<button className="button light small" type="button" onClick={showAllCopies}>Choose QR labels to print</button>} />
+    {copies && <CopyLabels copies={copies} title="All book copies" />}
   </>;
 }
 
@@ -315,21 +282,20 @@ function RequestsPage({ setNotice }) {
   </>;
 }
 
-function StudentsPage({ setNotice }) {
+function StudentsPage({ setNotice, onAddFine }) {
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
-  async function load() {
-    setLoading(true);
-    try { setMembers((await api("/members/")).results); }
-    finally { setLoading(false); }
-  }
-  useEffect(() => { load().catch((error) => noticeText(setNotice, error.message, "error")); }, []);
+  const [query, setQuery] = useState("");
+  const [choices, setChoices] = useState({});
+  useEffect(() => { api("/members/").then((data) => setMembers(data.results)).catch((error) => noticeText(setNotice, error.message, "error")).finally(() => setLoading(false)); }, []);
+  const visible = filterRows(members.map((member) => ({ ...member, portal_state: member.portal_ready ? "ready" : "pending" })), query, choices);
+  const courses = [...new Set(members.map((member) => member.course))].filter(Boolean).sort();
   return <>
-    <PageTitle eyebrow="DIRECTORY / PORTAL ACCESS" title="Students" note="Approved accounts can use their Student ID to borrow from the QR catalogue." />
+    <PageTitle eyebrow="DIRECTORY / PORTAL ACCESS" title="Students" note="Find a student, check account details, or add a fine directly." />
     <section className="panel"><div className="panel-head"><div><span className="eyebrow">APPROVED MEMBERS</span><h3>Campus readers</h3></div><span className="pill">{members.length} students</span></div>
-      <div className="table-scroll"><table><thead><tr><th>Student</th><th>Student ID</th><th>Course</th><th>Portal</th><th>Fine balance</th></tr></thead><tbody>{members.map((member) => <tr key={member.id}><td><b>{member.name}</b><small>{member.email}</small></td><td><code>{member.student_id}</code></td><td>{member.course} · Year {member.year}</td><td><span className={`status ${member.portal_ready ? "approved" : "pending"}`}>{member.portal_ready ? "Ready" : "Password needed"}</span></td><td>₹{member.fine_balance}</td></tr>)}</tbody></table></div>
-      {loading && <p className="empty">Loading students…</p>}
-      {!loading && members.length === 0 && <p className="empty">Approved student accounts will appear here.</p>}
+      <RecordFilters query={query} onQuery={setQuery} choices={choices} onChoices={setChoices} count={visible.length} loading={loading} label="Search name, student ID, email, or course" groups={[{ key: "course", label: "Course", options: courses.map((value) => ({ value, label: value })) }, { key: "year", label: "Year", options: [...new Set(members.map((member) => String(member.year)))].sort().map((value) => ({ value, label: `Year ${value}` })) }, { key: "portal_state", label: "Portal access", options: [{ value: "ready", label: "Ready" }, { value: "pending", label: "Password needed" }] }]} />
+      <div className="table-scroll"><table><thead><tr><th>Student</th><th>Student ID</th><th>Course</th><th>Portal</th><th>Fine balance</th><th>Actions</th></tr></thead><tbody>{visible.map((member) => <tr key={member.id}><td><b>{member.name}</b><small>{member.email}</small></td><td><code>{member.student_id}</code></td><td>{member.course} · Year {member.year}</td><td><span className={`status ${member.portal_ready ? "approved" : "pending"}`}>{member.portal_ready ? "Ready" : "Password needed"}</span></td><td>₹{member.fine_balance}</td><td><button className="button danger small" onClick={() => onAddFine(member)} aria-label={`Add fine for ${member.name}`}>Add fine</button></td></tr>)}</tbody></table></div>
+      {!loading && !visible.length && <p className="empty">No students match. Clear your search or try fewer filters.</p>}
     </section>
   </>;
 }
@@ -419,24 +385,30 @@ function LoansPage({ setNotice }) {
 function TransactionsPage({ setNotice, student = false }) {
   const [transactions, setTransactions] = useState([]);
   const [query, setQuery] = useState("");
-  const [type, setType] = useState("");
+  const [type, setType] = useState([]);
+  const [appliedQuery, setAppliedQuery] = useState("");
+  const requestSequence = useRef(0);
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 });
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async (searchTerm, selectedType, pageNumber = 1) => {
+    const sequence = ++requestSequence.current;
     setLoading(true);
     try {
-      const params = new URLSearchParams({ q: searchTerm, type: selectedType, page: String(pageNumber) });
+      const params = new URLSearchParams({ q: searchTerm, page: String(pageNumber) });
+      selectedType.forEach((value) => params.append("type", value));
       const path = student ? "/student/transactions/" : "/transactions/";
       const result = await api(`${path}?${params}`);
+      if (sequence !== requestSequence.current) return;
+      setAppliedQuery(searchTerm);
       setTransactions(result.results);
       setPagination(result.pagination);
     } finally {
-      setLoading(false);
+      if (sequence === requestSequence.current) setLoading(false);
     }
   }, [student]);
 
-  useEffect(() => { load("", "", 1).catch((error) => noticeText(setNotice, error.message, "error")); }, [load]);
+  useEffect(() => { load("", [], 1).catch((error) => noticeText(setNotice, error.message, "error")); }, [load]);
 
   function submit(event) {
     event.preventDefault();
@@ -451,9 +423,11 @@ function TransactionsPage({ setNotice, student = false }) {
     <section className="panel transaction-panel">
       <form className="transaction-filters" onSubmit={submit}>
         <label className="transaction-search">Search<input value={query} disabled={loading} onChange={(event) => setQuery(event.target.value)} placeholder={student ? "Title, issue ID, or fine reason" : "Student, title, Copy ID, or issue ID"} /></label>
-        <label>Activity type<select value={type} disabled={loading} onChange={(event) => { const value = event.target.value; setType(value); load(query, value, 1).catch((error) => noticeText(setNotice, error.message, "error")); }}><option value="">All activity</option><option value="checkout">Book issued</option><option value="return">Book returned</option><option value="renewal">Renewal</option><option value="fine_added">Fine added</option><option value="fine_paid">Fine paid</option></select></label>
+
         <button className="button primary" disabled={loading}>{loading ? "Loading…" : "Search history"}</button>
       </form>
+      <CheckboxGroup label="Activity types" options={Object.entries(labels).map(([value, label]) => ({ value, label }))} selected={type} disabled={loading} onChange={(values) => { setType(values); load(query, values, 1).catch((error) => noticeText(setNotice, error.message, "error")); }} />
+      <ActiveFilters items={[...(appliedQuery ? [{ key: "query", label: `Search: ${appliedQuery}`, remove: () => { setQuery(""); load("", type, 1).catch((error) => noticeText(setNotice, error.message, "error")); } }] : []), ...type.map((value) => ({ key: value, label: labels[value], remove: () => { const values = type.filter((item) => item !== value); setType(values); load(query, values, 1).catch((error) => noticeText(setNotice, error.message, "error")); } }))]} onClear={() => { setQuery(""); setType([]); load("", [], 1).catch((error) => noticeText(setNotice, error.message, "error")); }} />
       <div className="transaction-list">{transactions.map((item) => <article className="transaction-row" key={item.id}>
         <span className={`transaction-icon ${item.type}`} aria-hidden="true">{icons[item.type]}</span>
         <div className="transaction-copy"><div className="transaction-heading"><b>{item.title}</b><span className={`status ${item.status}`}>{labels[item.type]}</span></div><p>{item.details}</p>{!student && <small>{item.student_name} · {item.student_id}</small>}<time dateTime={item.occurred_at}>{new Date(item.occurred_at).toLocaleString()}</time></div>
@@ -464,8 +438,12 @@ function TransactionsPage({ setNotice, student = false }) {
   </>;
 }
 
-function FinesPage({ setNotice }) {
+function FinesPage({ setNotice, initialMemberId = "" }) {
+  const [selectedMemberId, setSelectedMemberId] = useState(initialMemberId);
   const [fines, setFines] = useState([]);
+  const [fineSearch, setFineSearch] = useState("");
+  const [fineFilters, setFineFilters] = useState({});
+  const visibleFines = filterRows(fines, fineSearch, fineFilters);
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -526,14 +504,14 @@ function FinesPage({ setNotice }) {
     <div className="content-grid">
       <section className="panel"><div className="panel-head"><div><span className="eyebrow">LIBRARIAN ENTRY</span><h3>Add a custom fine</h3></div></div>
         <form className="stack-form compact" onSubmit={addFine}>
-          <SearchPicker label="Student" name="member_id" required loading={loading} options={members.map((member) => ({ value: member.id, label: member.name, detail: `${member.student_id} · ${member.email || member.course || ""}` }))} placeholder="Search student name or ID…" />
+          <SearchPicker label="Student" name="member_id" value={selectedMemberId} onChange={setSelectedMemberId} required loading={loading} options={members.map((member) => ({ value: member.id, label: member.name, detail: `${member.student_id} · ${member.email || member.course || ""}` }))} placeholder="Search student name or ID…" />
           <label>Amount in rupees<input name="amount" type="number" min="0.01" step="0.01" required /></label>
           <label>Reason<input name="reason" maxLength="200" required placeholder="Damaged cover" /></label>
           <button className="button primary" disabled={busy}>{busy ? "Saving…" : "Add unpaid fine"}</button>
         </form>
       </section>
       <section className="panel list-panel"><div className="panel-head"><div><span className="eyebrow">ALL RECORDS</span><h3>Fines and payments</h3></div><span className="pill">{fines.length} entries</span></div>
-        <div className="fine-list">{fines.map((fine) => <article className="fine-row" key={fine.id}><div className="fine-amount">₹{fine.amount}</div><div className="fine-info"><b>{fine.member_name} <small>{fine.student_id}</small></b><span>{fine.reason}</span><small>{fine.fine_type === "overdue" ? "Overdue fine" : "Custom fine"} · {new Date(fine.created_at).toLocaleDateString()}</small></div><span className={`status ${fine.status}`}>{fine.status}</span>{fine.status === "unpaid" && (fine.current ? <small className="fine-live-note">Return the book to finalise this amount, then mark it paid or remove it.</small> : <div className="fine-actions"><button className="button light small" disabled={busy} onClick={() => markPaid(fine)}>Mark paid</button><button className="button danger small" disabled={busy} onClick={() => removeFine(fine)}>Remove fine</button></div>)}</article>)}{loading && <p className="empty">Loading fines…</p>}{!loading && fines.length === 0 && <p className="empty">There are no fines to show.</p>}</div>
+        <RecordFilters query={fineSearch} onQuery={setFineSearch} choices={fineFilters} onChoices={setFineFilters} count={visibleFines.length} loading={loading} label="Search student, ID, fine reason, or amount" groups={[{ key: "status", label: "Payment status", options: [{ value: "unpaid", label: "Unpaid" }, { value: "paid", label: "Paid" }] }, { key: "fine_type", label: "Fine type", options: [{ value: "custom", label: "Custom" }, { value: "overdue", label: "Overdue" }] }]} /><div className="fine-list">{visibleFines.map((fine) => <article className="fine-row" key={fine.id}><div className="fine-amount">₹{fine.amount}</div><div className="fine-info"><b>{fine.member_name} <small>{fine.student_id}</small></b><span>{fine.reason}</span><small>{fine.fine_type === "overdue" ? "Overdue fine" : "Custom fine"} · {new Date(fine.created_at).toLocaleDateString()}</small></div><span className={`status ${fine.status}`}>{fine.status}</span>{fine.status === "unpaid" && (fine.current ? <small className="fine-live-note">Return the book to finalise this amount, then mark it paid or remove it.</small> : <div className="fine-actions"><button className="button light small" disabled={busy} onClick={() => markPaid(fine)}>Mark paid</button><button className="button danger small" disabled={busy} onClick={() => removeFine(fine)}>Remove fine</button></div>)}</article>)}{loading && <p className="empty">Loading fines…</p>}{!loading && visibleFines.length === 0 && <p className="empty">No fines match. Try fewer filters or clear the search.</p>}</div>
       </section>
     </div>
   </>;
@@ -792,8 +770,9 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
   const todayStr = getLocalDateStr();
   const [subTab, setSubTab] = useState("browse");
   const [selectedDate, setSelectedDate] = useState(todayStr);
-  const [spaceType, setSpaceType] = useState("all");
-  const [availFilter, setAvailFilter] = useState("all");
+  const [spaceType, setSpaceType] = useState([]);
+  const [spaceQuery, setSpaceQuery] = useState("");
+  const [availFilter, setAvailFilter] = useState([]);
   const [spaces, setSpaces] = useState([]);
   const [myBookings, setMyBookings] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -813,7 +792,7 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
     setLoading(true);
     try {
       const [spacesData, bookingsData] = await Promise.all([
-        api(`/spaces/?date=${encodeURIComponent(selectedDate)}&type=${encodeURIComponent(spaceType)}`),
+        api(`/spaces/?date=${encodeURIComponent(selectedDate)}`),
         api("/student/space-bookings/"),
       ]);
       setSpaces(spacesData.results || []);
@@ -827,7 +806,7 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
 
   useEffect(() => {
     loadData();
-  }, [selectedDate, spaceType]);
+  }, [selectedDate]);
 
   function openBookingModal(space, presetSlot = null) {
     setModalError("");
@@ -933,10 +912,9 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
     }
   }
 
-  const filteredSpaces = spaces.filter((sp) => {
-    if (availFilter === "empty_only") return sp.empty_slots_count > 0;
-    if (availFilter === "occupied_only") return sp.occupied_slots_count > 0 || sp.pending_slots_count > 0;
-    return true;
+  const filteredSpaces = spaces.filter((space) => {
+    const matchesQuery = `${space.name} ${space.location} ${space.description} ${space.amenities}`.toLowerCase().includes(spaceQuery.trim().toLowerCase());
+    return matchesQuery && (!spaceType.length || spaceType.includes(space.space_type)) && (!availFilter.length || (availFilter.includes("empty_only") && space.empty_slots_count > 0) || (availFilter.includes("occupied_only") && (space.occupied_slots_count > 0 || space.pending_slots_count > 0)));
   });
 
   const pendingCount = myBookings.filter((b) => b.status === "pending").length;
@@ -979,29 +957,15 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
                   onChange={(e) => setSelectedDate(e.target.value)}
                 />
               </label>
-              <label className="filter-item">
-                Type:
-                <select value={spaceType} onChange={(e) => setSpaceType(e.target.value)}>
-                  <option value="all">All Spaces</option>
-                  <option value="pod">Study Pods</option>
-                  <option value="room">Conference Rooms</option>
-                  <option value="slot">Study Slots</option>
-                </select>
-              </label>
-              <label className="filter-item">
-                Availability:
-                <select value={availFilter} onChange={(e) => setAvailFilter(e.target.value)}>
-                  <option value="all">Any Status</option>
-                  <option value="empty_only">Empty Slots Available</option>
-                  <option value="occupied_only">Occupied / In Use</option>
-                </select>
-              </label>
+
+
             </div>
             <button type="button" className="button light small" disabled={loading} onClick={loadData}>
               {loading ? "Checking…" : "Refresh schedule"}
             </button>
           </div>
 
+          <RecordFilters query={spaceQuery} onQuery={setSpaceQuery} choices={{ space_type: spaceType, availability: availFilter }} onChoices={(choices) => { setSpaceType(choices.space_type || []); setAvailFilter(choices.availability || []); }} count={filteredSpaces.length} loading={loading} label="Search spaces, locations, or amenities" groups={[{ key: "space_type", label: "Space type", options: [{ value: "pod", label: "Study pods" }, { value: "room", label: "Conference rooms" }, { value: "slot", label: "Study slots" }] }, { key: "availability", label: "Availability", options: [{ value: "empty_only", label: "Free slots available" }, { value: "occupied_only", label: "Booked or pending slots" }] }]} />
           <div className="space-grid">
             {filteredSpaces.map((space) => (
               <article className="space-card" key={space.id}>
@@ -1283,9 +1247,10 @@ function LibrarianSpaceBookingsPage({ setNotice }) {
   const [bookings, setBookings] = useState([]);
   const [spaces, setSpaces] = useState([]);
   const [subTab, setSubTab] = useState("requests");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [bookingQuery, setBookingQuery] = useState("");
+  const [bookingFilters, setBookingFilters] = useState({});
+  const visibleBookings = filterRows(bookings, bookingQuery, bookingFilters);
   const [dateFilter, setDateFilter] = useState("");
-  const [typeFilter, setTypeFilter] = useState("all");
   const [scheduleDate, setScheduleDate] = useState(getLocalDateStr());
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState("");
@@ -1296,9 +1261,7 @@ function LibrarianSpaceBookingsPage({ setNotice }) {
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (statusFilter && statusFilter !== "all") params.append("status", statusFilter);
       if (dateFilter) params.append("date", dateFilter);
-      if (typeFilter && typeFilter !== "all") params.append("type", typeFilter);
 
       const [bookingsData, spacesData] = await Promise.all([
         api(`/librarian/space-bookings/?${params}`),
@@ -1315,7 +1278,7 @@ function LibrarianSpaceBookingsPage({ setNotice }) {
 
   useEffect(() => {
     loadData();
-  }, [statusFilter, dateFilter, typeFilter, scheduleDate]);
+  }, [dateFilter, scheduleDate]);
 
   async function review(booking, action, reason = "") {
     setBusyId(booking.id);
@@ -1378,16 +1341,7 @@ function LibrarianSpaceBookingsPage({ setNotice }) {
         <section className="panel">
           <div className="space-filters" style={{ margin: "0 0 16px" }}>
             <div className="filter-group">
-              <label className="filter-item">
-                Status:
-                <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-                  <option value="all">All Statuses</option>
-                  <option value="pending">Pending Approval</option>
-                  <option value="confirmed">Confirmed</option>
-                  <option value="rejected">Rejected</option>
-                  <option value="cancelled">Cancelled</option>
-                </select>
-              </label>
+
               <label className="filter-item">
                 Date:
                 <input
@@ -1406,20 +1360,13 @@ function LibrarianSpaceBookingsPage({ setNotice }) {
                   Clear date
                 </button>
               )}
-              <label className="filter-item">
-                Type:
-                <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
-                  <option value="all">All Types</option>
-                  <option value="pod">Pods</option>
-                  <option value="room">Conference Rooms</option>
-                  <option value="slot">Slots</option>
-                </select>
-              </label>
+
             </div>
           </div>
 
+          <RecordFilters query={bookingQuery} onQuery={setBookingQuery} choices={bookingFilters} onChoices={setBookingFilters} count={visibleBookings.length} loading={loading} label="Search student, ID, room, or purpose" groups={[{ key: "status", label: "Booking status", options: [{ value: "pending", label: "Pending" }, { value: "confirmed", label: "Confirmed" }, { value: "rejected", label: "Rejected" }, { value: "cancelled", label: "Cancelled" }] }, { key: "space_type", label: "Space type", options: [{ value: "pod", label: "Study pods" }, { value: "room", label: "Conference rooms" }, { value: "slot", label: "Study slots" }] }]} />
           <div className="booking-list">
-            {bookings.map((b) => (
+            {visibleBookings.map((b) => (
               <article className="booking-row-card" key={b.id}>
                 <div className="booking-card-main">
                   <div className={`booking-card-icon ${b.space_type || "pod"}`}>
@@ -1482,7 +1429,7 @@ function LibrarianSpaceBookingsPage({ setNotice }) {
               </article>
             ))}
             {loading && <p className="empty">Loading requests…</p>}
-            {!loading && bookings.length === 0 && (
+            {!loading && visibleBookings.length === 0 && (
               <p className="empty">No booking requests found for the selected filter.</p>
             )}
           </div>
@@ -1602,33 +1549,20 @@ function LibrarianSpaceBookingsPage({ setNotice }) {
 
 
 function StudentPortal({ user, tab, setTab, setNotice, selectedBook, onOpenBook, onBackToBooks, onBookRatingChange }) {
-  const [books, setBooks] = useState([]);
   const [loans, setLoans] = useState([]);
   const [holds, setHolds] = useState([]);
   const [fines, setFines] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [renewingLoanId, setRenewingLoanId] = useState("");
-  const [query, setQuery] = useState("");
-  const [category, setCategory] = useState("");
-  const [availability, setAvailability] = useState("all");
-  const [categories, setCategories] = useState([]);
-  const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 });
   const [copyId, setCopyId] = useState("");
   const [copyInfo, setCopyInfo] = useState(null);
   const [scanOpen, setScanOpen] = useState(false);
   const [slip, setSlip] = useState(null);
 
-  async function load(searchTerm = query, pageNumber = 1, selectedCategory = category, selectedAvailability = availability) {
+  async function load() {
     setLoading(true);
     try {
-      if (tab === "catalogue") {
-        const params = new URLSearchParams({ q: searchTerm, page: String(pageNumber), category: selectedCategory, availability: selectedAvailability });
-        const result = await api(`/catalogue/?${params}`);
-        setBooks(result.results);
-        setCategories(result.categories || []);
-        setPagination(result.pagination);
-      }
       if (tab === "my_loans") setLoans((await api("/student/loans/")).results);
       if (tab === "my_holds") setHolds((await api("/student/reservations/")).results);
       if (tab === "my_fines") setFines((await api("/fines/")).results);
@@ -1662,11 +1596,6 @@ function StudentPortal({ user, tab, setTab, setNotice, selectedBook, onOpenBook,
     } finally {
       setBusy(false);
     }
-  }
-
-  async function search(event) {
-    event.preventDefault();
-    try { await load(query, 1); } catch (error) { noticeText(setNotice, error.message, "error"); }
   }
 
   async function reserveBook(bookId) {
@@ -1717,12 +1646,7 @@ function StudentPortal({ user, tab, setTab, setNotice, selectedBook, onOpenBook,
   if (tab === "catalogue") return <>
     <section className="student-welcome"><div><span className="eyebrow">YOUR CAMPUS LIBRARY</span><h2>Hello, {user.name.split(" ")[0]}.</h2><p>Find a title that interests you, then check out the exact copy from its QR label.</p></div><LibraryArt className="welcome-illustration" /></section>
     {slip && <IssueSlip loan={slip} onClose={() => setSlip(null)} />}
-    <section className="panel"><div className="panel-head"><div><span className="eyebrow">COLLECTION</span><h3>Search the shelves</h3></div></div><form className="search-row" onSubmit={search}><input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search books or authors" placeholder="Search books or authors" /><button className="button light" disabled={loading}>{loading ? "Loading…" : "Search"}</button></form>
-      <div className="catalogue-filters"><label>Category<select value={category} onChange={(event) => { const value = event.target.value; setCategory(value); load(query, 1, value, availability).catch((error) => noticeText(setNotice, error.message, "error")); }}><option value="">All categories</option>{categories.map((item) => <option key={item} value={item}>{item}</option>)}</select></label><label>Availability<select value={availability} onChange={(event) => { const value = event.target.value; setAvailability(value); load(query, 1, category, value).catch((error) => noticeText(setNotice, error.message, "error")); }}><option value="all">Any status</option><option value="available">Available now</option><option value="unavailable">Join the hold queue</option></select></label></div>
-      <p className="route-hint">{pagination.total} titles in this view</p>
-      <div className="catalogue-grid book-catalogue-grid">{books.map((book) => <button type="button" className="catalogue-card book-tile" key={book.id} onClick={() => onOpenBook(book)}><BookCover book={book} /><span className="eyebrow">{book.category}</span><h3>{book.title}</h3><p>{book.author}</p><BookRating rating={book.average_rating} count={book.rating_count} /><div className="catalogue-footer"><span>{book.available_to_borrow} copies available</span><small>Shelf {book.shelf || "Unassigned"}</small></div><span className="book-tile-link">View title <span aria-hidden="true">↗</span></span></button>)}{loading && <p className="empty">Loading books…</p>}{!loading && books.length === 0 && <p className="empty">No books match that search.</p>}</div>
-      <div className="pagination-controls"><span>Page {pagination.page} of {pagination.pages}</span><div><button className="button light small" disabled={loading || pagination.page <= 1} onClick={() => load(query, pagination.page - 1).catch((error) => noticeText(setNotice, error.message, "error"))}>← Previous</button><button className="button light small" disabled={loading || pagination.page >= pagination.pages} onClick={() => load(query, pagination.page + 1).catch((error) => noticeText(setNotice, error.message, "error"))}>Next →</button></div></div>
-    </section>
+    <CatalogueExplorer path="/catalogue/" renderBook={(book) => <CatalogueTile key={book.id} book={book} onOpen={onOpenBook} />} />
     <section className="panel scan-student"><div><span className="eyebrow">READY TO BORROW</span><h3>Scan your copy</h3><p>Sign in first, scan the QR label, and confirm the issue. You can borrow up to five books.</p><button className="button primary" disabled={busy} onClick={() => setScanOpen((open) => !open)}>{scanOpen ? "Close camera" : "Open QR scanner"}</button></div><div className="scan-side">{copyInfo ? <><b>{copyInfo.book_title}</b><span>{copyInfo.copy_id}</span><span className={`status ${copyInfo.status}`}>{copyInfo.status}</span>{copyInfo.status === "available" && <button className="button dark" disabled={busy} onClick={issueCopy}>{busy ? "Checking out…" : "Confirm checkout"}</button>}</> : <span className="scan-symbol">⌗</span>}</div></section>
     <Scanner open={scanOpen} onScan={scanned} onError={(message) => noticeText(setNotice, message, "error")} />
   </>;
@@ -1759,6 +1683,7 @@ function StudentPortal({ user, tab, setTab, setNotice, selectedBook, onOpenBook,
 export default function App() {
   const [user, setUser] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [fineMemberId, setFineMemberId] = useState("");
   const reducedMotion = useReducedMotion();
   const [setupAvailable, setSetupAvailable] = useState(false);
   const [tab, setTab] = useState("overview");
@@ -1847,9 +1772,9 @@ export default function App() {
   else if (tab === "renewals") content = <RenewalsPage setNotice={setNotice} />;
   else if (tab === "transactions") content = <TransactionsPage setNotice={setNotice} />;
   else if (tab === "reports") content = <ReportsPage setNotice={setNotice} />;
-  else if (tab === "students") content = <StudentsPage setNotice={setNotice} />;
+  else if (tab === "students") content = <StudentsPage setNotice={setNotice} onAddFine={(member) => { setFineMemberId(member.id); setTab("fines"); window.scrollTo({ top: 0 }); }} />;
   else if (tab === "loans") content = <LoansPage setNotice={setNotice} />;
-  else if (tab === "fines") content = <FinesPage setNotice={setNotice} />;
+  else if (tab === "fines") content = <FinesPage key={fineMemberId} setNotice={setNotice} initialMemberId={fineMemberId} />;
   else content = <ReviewsPage setNotice={setNotice} />;
 
   return <div className={`app-shell ${isStudent ? "student-shell" : ""} ${menuOpen ? "menu-open" : ""}`}>
