@@ -4,6 +4,7 @@ import { api, formBody } from "./api.js";
 import Scanner from "./Scanner.jsx";
 import Chatbot from "./Chatbot.jsx";
 import LibraryArt from "./LibraryArt.jsx";
+import Preloader from "./Preloader.jsx";
 import { AnimatePresence, LazyMotion, domAnimation, m, useReducedMotion } from "motion/react";
 import { BookOpen, CalendarDays, ChartNoAxesCombined, CircleUserRound, ClipboardList, LayoutDashboard, LibraryBig, MapPin, Menu, Plus, Receipt, Repeat2, Sparkles, Star, Users, X } from "lucide-react";
 
@@ -97,7 +98,7 @@ function AuthScreen({ onLogin, onSetup, onSignup, setupAvailable }) {
   return (
     <main className="auth-page">
       <section className="auth-card">
-        <div className="auth-brand"><img src="/assets/campusshelf-emblem.png" alt="" /><div><b>CampusShelf</b><small>READ. CONNECT. DISCOVER.</small></div></div>
+        <div className="auth-brand"><img src="/assets/campusshelf-logo.svg" alt="" /><div><b>CampusShelf</b><small>READ. CONNECT. DISCOVER.</small></div></div>
         <span className="eyebrow">YOUR NEXT CHAPTER STARTS HERE</span>
         <h1>{mode === "signup" ? "Create student account" : mode === "setup" ? "Set up the library desk" : "Welcome back"}</h1>
         <p className="muted">{mode === "signup" ? "Enter your campus details to create your library account immediately." : mode === "setup" ? "Create the first librarian account to get started." : "Sign in using your student ID, librarian ID, or email."}</p>
@@ -1804,7 +1805,7 @@ export default function App() {
     }
   }
 
-  if (loading) return <main className="loading-screen"><img src="/assets/campusshelf-emblem.png" alt="" /><span>Opening the library…</span></main>;
+  if (loading) return <Preloader />;
   if (!user) return <><AuthScreen onLogin={signIn} onSetup={setup} onSignup={signup} setupAvailable={setupAvailable} />{notice && <div className={`toast ${notice.kind}`}>{notice.text}</div>}<Chatbot user={null} /></>;
 
   const isStudent = user.role === "student";
@@ -1837,7 +1838,7 @@ export default function App() {
     {menuOpen && <button className="nav-backdrop" aria-label="Close navigation" onClick={() => setMenuOpen(false)} />}
     <aside className="sidebar" id="portal-navigation">
       <button className="drawer-close" type="button" aria-label="Close navigation" onClick={() => setMenuOpen(false)}><X size={20} /></button>
-      <div className="sidebar-brand"><img src="/assets/campusshelf-emblem.png" alt="" /><div><b>CampusShelf</b><small>{isStudent ? "STUDENT PORTAL" : "LIBRARIAN DESK"}</small></div></div>
+      <div className="sidebar-brand"><img src="/assets/campusshelf-logo.svg" alt="" /><div><b>CampusShelf</b><small>{isStudent ? "STUDENT PORTAL" : "LIBRARIAN DESK"}</small></div></div>
       <div className="sidebar-label">{isStudent ? "YOUR LIBRARY" : "WORKSPACE"}</div>
       <nav aria-label={isStudent ? "Student portal" : "Librarian workspace"}>{tabs.map(([key, label, icon]) => <button className={activeTab === key ? "active" : ""} key={key} aria-current={activeTab === key ? "page" : undefined} onClick={() => { setTab(key); setMenuOpen(false); window.scrollTo({ top: 0 }); }}><NavIcon name={icon} /><span>{label}</span>{activeTab === key && <span className="nav-active-dot" />}</button>)}</nav>
       {!isStudent && <div className="sidebar-help"><span className="eyebrow">QUICK NOTE</span><p>Scan the label on the physical copy, not the book cover.</p><a href="/admin/">Open Django Admin ↗</a></div>}
