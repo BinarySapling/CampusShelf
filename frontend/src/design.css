@@ -1054,7 +1054,7 @@ td small { font-size: 11px; }
     min-width: 0;
     max-width: none;
   }
-  .sidebar-user, .sidebar-help, .sidebar-portal-label, .drawer-close, .menu-toggle, .nav-backdrop { display: none !important; }
+  .sidebar-help, .sidebar-portal-label, .drawer-close, .menu-toggle, .nav-backdrop { display: none !important; }
   .main-area { padding: var(--portal-nav-height) 16px 90px; }
   .topbar { top: var(--portal-nav-height); min-height: 76px; margin-bottom: 24px; }
 }
@@ -1162,4 +1162,76 @@ input[type="time"],
 code {
   font-family: "DM Mono", Consolas, monospace;
   font-variant-numeric: lining-nums tabular-nums;
+}
+
+/* Sign-out is grouped with the account that owns the session. */
+.sidebar .sidebar-profile-menu {
+  position: relative;
+  flex: 0 0 auto;
+  min-width: 0;
+  overflow: visible;
+}
+.sidebar .sidebar-profile-trigger {
+  display: flex;
+  min-width: 0;
+  min-height: 42px;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 7px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  background: transparent;
+  color: #294341;
+  cursor: pointer;
+  list-style: none;
+  transition: background .16s ease, border-color .16s ease;
+}
+.sidebar .sidebar-profile-trigger::-webkit-details-marker { display: none; }
+.sidebar .sidebar-profile-trigger::after {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  margin: -3px 2px 0 1px;
+  border-right: 1.5px solid #788b85;
+  border-bottom: 1.5px solid #788b85;
+  content: "";
+  transform: rotate(45deg);
+  transition: transform .16s ease;
+}
+.sidebar .sidebar-profile-menu:hover > .sidebar-profile-trigger,
+.sidebar .sidebar-profile-menu[open] > .sidebar-profile-trigger,
+.sidebar .sidebar-profile-trigger:focus-visible {
+  border-color: rgba(36, 79, 77, .12);
+  background: rgba(255, 255, 255, .65);
+}
+.sidebar .sidebar-profile-menu[open] > .sidebar-profile-trigger::after { margin-top: 3px; transform: rotate(225deg); }
+.sidebar .sidebar-profile-popover {
+  position: absolute;
+  z-index: 90;
+  top: calc(100% + 9px);
+  right: 0;
+  display: none;
+  min-width: 176px;
+  padding: 8px;
+  border: 1px solid rgba(36, 79, 77, .13);
+  border-radius: 13px;
+  background: rgba(255, 254, 250, .97);
+  box-shadow: 0 18px 40px rgba(23, 46, 53, .16);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+}
+.sidebar .sidebar-profile-menu[open] > .sidebar-profile-popover { display: grid; }
+.sidebar .sidebar-profile-popover .signout-button { width: 100%; min-height: 40px; font-size: 11px; }
+@media (max-width: 1100px) {
+  .sidebar { grid-template-columns: minmax(0, 1fr) auto; }
+  .sidebar-brand { grid-column: 1; grid-row: 1; }
+  .sidebar nav.sidebar-navigation { grid-column: 1 / -1; grid-row: 2; }
+  .sidebar .sidebar-profile-menu { display: flex !important; grid-column: 2; grid-row: 1; justify-self: end; }
+  .sidebar .sidebar-profile-trigger { min-height: 38px; }
+  .sidebar .sidebar-profile-popover { position: fixed; top: calc(var(--portal-nav-height) - 1px); right: 12px; }
+}
+@media (max-width: 520px) {
+  .sidebar .sidebar-user-copy { display: none; }
+  .sidebar .sidebar-profile-trigger { width: 38px; justify-content: center; padding: 0; }
+  .sidebar .sidebar-profile-trigger::after, .sidebar .sidebar-profile-trigger .sidebar-online-dot { display: none; }
 }

@@ -2135,13 +2135,13 @@ export default function App() {
 
   useEffect(() => {
     if (menuOpen) return undefined;
-    const closeGroups = () => sidebarRef.current?.querySelectorAll(".sidebar-nav-group[open]").forEach((group) => { group.open = false; });
+    const closeGroups = () => sidebarRef.current?.querySelectorAll(".sidebar-nav-group[open], .sidebar-profile-menu[open]").forEach((group) => { group.open = false; });
     const closeOnOutsideClick = (event) => {
       if (!sidebarRef.current?.contains(event.target)) closeGroups();
     };
     const closeOnEscape = (event) => {
       if (event.key !== "Escape") return;
-      const openGroups = [...(sidebarRef.current?.querySelectorAll(".sidebar-nav-group[open]") || [])];
+      const openGroups = [...(sidebarRef.current?.querySelectorAll(".sidebar-nav-group[open], .sidebar-profile-menu[open]") || [])];
       if (!openGroups.length) return;
       event.preventDefault();
       closeGroups();
@@ -2218,9 +2218,18 @@ export default function App() {
     sidebarRef.current?.querySelectorAll(".sidebar-nav-group[open]").forEach((openGroup) => {
       if (openGroup !== group) openGroup.open = false;
     });
+    const profileMenu = sidebarRef.current?.querySelector(".sidebar-profile-menu[open]");
+    if (profileMenu) profileMenu.open = false;
     group.open = true;
   }
   function closeNavigationGroup(event) {
+    if (!event.currentTarget.contains(document.activeElement)) event.currentTarget.open = false;
+  }
+  function openProfileMenu(event) {
+    sidebarRef.current?.querySelectorAll(".sidebar-nav-group[open]").forEach((group) => { group.open = false; });
+    event.currentTarget.open = true;
+  }
+  function closeProfileMenu(event) {
     if (!event.currentTarget.contains(document.activeElement)) event.currentTarget.open = false;
   }
   const activeTab = tab === "book_detail" || tab === "edit_book" ? "books" : tab === "student_book" ? "catalogue" : tab;
@@ -2267,9 +2276,20 @@ export default function App() {
         </details>;
       })}</nav>
       <div className="sidebar-help"><span className="eyebrow">{isStudent ? "QUICK TIP" : "AT THE DESK"}</span><p>{isStudent ? "Scan a copy ID to issue a book. Bring returns to the librarian." : "Scan a copy’s unique ID when issuing or receiving a return."}</p>{!isStudent && <a href="/admin/">Open Django Admin <span aria-hidden="true">↗</span></a>}</div>
-      <div className="sidebar-user"><div className="avatar">{user.name.slice(0, 1).toUpperCase()}</div><div className="sidebar-user-copy"><b>{user.name}</b><small>{isStudent ? `STUDENT ID · ${user.student_id}` : `STAFF ID · ${user.login_id}`}</small></div><span className="sidebar-online-dot" title="Signed in" aria-label="Signed in" /></div>
+      <details
+        className="sidebar-user sidebar-profile-menu"
+        onPointerEnter={(event) => { if (event.pointerType !== "touch") openProfileMenu(event); }}
+        onPointerLeave={(event) => { if (event.pointerType !== "touch") closeProfileMenu(event); }}
+      >
+        <summary className="sidebar-profile-trigger" aria-label={`Profile options for ${user.name}`}>
+          <span className="avatar" aria-hidden="true">{user.name.slice(0, 1).toUpperCase()}</span>
+          <span className="sidebar-user-copy"><b>{user.name}</b><small>{isStudent ? `STUDENT ID · ${user.student_id}` : `STAFF ID · ${user.login_id}`}</small></span>
+          <span className="sidebar-online-dot" title="Signed in" aria-label="Signed in" />
+        </summary>
+        <div className="sidebar-profile-popover"><button className="signout-button" type="button" onClick={signOut}>Sign out</button></div>
+      </details>
     </aside>
-    <main className="main-area" aria-hidden={menuOpen || undefined} inert={menuOpen || undefined}><header className="topbar"><button ref={menuToggleRef} className="menu-toggle" type="button" aria-label={menuOpen ? "Close navigation" : "Open navigation"} aria-expanded={menuOpen} aria-controls="portal-navigation" onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X size={21} aria-hidden="true" /> : <Menu size={21} aria-hidden="true" />}</button><div><span className="eyebrow">{isStudent ? "STUDENT PORTAL" : "LIBRARIAN WORKSPACE"}</span><h1 ref={routeHeadingRef} tabIndex={-1}>{active[1]}</h1></div><div className="topbar-right"><span className="portal-chip">{isStudent ? "Reader account" : "Library staff"}</span><span className="top-date"><time dateTime={new Date().toISOString().slice(0, 10)}>{new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</time></span><NotificationCenter user={user} onNavigate={setTab} /><button className="signout-button" type="button" onClick={signOut}>Sign out</button></div></header>
+    <main className="main-area" aria-hidden={menuOpen || undefined} inert={menuOpen || undefined}><header className="topbar"><button ref={menuToggleRef} className="menu-toggle" type="button" aria-label={menuOpen ? "Close navigation" : "Open navigation"} aria-expanded={menuOpen} aria-controls="portal-navigation" onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X size={21} aria-hidden="true" /> : <Menu size={21} aria-hidden="true" />}</button><div><span className="eyebrow">{isStudent ? "STUDENT PORTAL" : "LIBRARIAN WORKSPACE"}</span><h1 ref={routeHeadingRef} tabIndex={-1}>{active[1]}</h1></div><div className="topbar-right"><span className="portal-chip">{isStudent ? "Reader account" : "Library staff"}</span><span className="top-date"><time dateTime={new Date().toISOString().slice(0, 10)}>{new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</time></span><NotificationCenter user={user} onNavigate={setTab} /></div></header>
       {notice && <div className={`notice ${notice.kind}`} role={notice.kind === "error" ? "alert" : "status"} aria-live={notice.kind === "error" ? "assertive" : "polite"}>{notice.text}<button type="button" aria-label="Dismiss notification" onClick={() => setNotice(null)}>×</button></div>}
       <LazyMotion features={domAnimation}><AnimatePresence mode="wait" initial={false}><m.div id="portal-content" tabIndex={-1} className="page-content" key={tab + (selectedBook?.id || "")} initial={reducedMotion ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: reducedMotion ? 0 : -6 }} transition={{ duration: reducedMotion ? 0 : .2 }}>{content}</m.div></AnimatePresence></LazyMotion>
     </main>
