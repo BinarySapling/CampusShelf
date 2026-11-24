@@ -790,6 +790,7 @@ def scan_copy(request, copy_id):
         "copy_id": copy.copy_id,
         "status": Borrowing.BORROWED if active_loan else copy.status,
         "book_title": copy.book.title,
+        "book": book_data(copy.book),
         "shelf": copy.shelf,
     })
 
