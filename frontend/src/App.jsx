@@ -2213,6 +2213,16 @@ export default function App() {
   const navigationGroups = isStudent
     ? [["DISCOVER", ["catalogue", "scan_copy", "space_bookings"]], ["MY READING", ["my_loans", "my_history", "my_holds", "my_fines"]], ["ACCOUNT", ["account"]]]
     : [["LIBRARY", ["overview", "books", "add_book", "reservations", "space_bookings"]], ["CIRCULATION", ["loans", "renewals", "transactions", "fines"]], ["COMMUNITY", ["requests", "students", "reviews"]], ["MANAGEMENT", ["reports", "account"]]];
+  function openNavigationGroup(event) {
+    const group = event.currentTarget;
+    sidebarRef.current?.querySelectorAll(".sidebar-nav-group[open]").forEach((openGroup) => {
+      if (openGroup !== group) openGroup.open = false;
+    });
+    group.open = true;
+  }
+  function closeNavigationGroup(event) {
+    if (!event.currentTarget.contains(document.activeElement)) event.currentTarget.open = false;
+  }
   const activeTab = tab === "book_detail" || tab === "edit_book" ? "books" : tab === "student_book" ? "catalogue" : tab;
   const active = tabs.find((item) => item[0] === activeTab) || tabs[0];
   let content;
@@ -2246,7 +2256,12 @@ export default function App() {
       <nav className="sidebar-navigation" aria-label={isStudent ? "Student portal" : "Librarian workspace"}>{navigationGroups.map(([heading, keys]) => {
         const groupTabs = keys.map((key) => tabs.find(([tabKey]) => tabKey === key)).filter(Boolean);
         const groupIsActive = groupTabs.some(([key]) => activeTab === key);
-        return <details className={`sidebar-nav-group ${groupIsActive ? "has-active" : ""}`} key={heading}>
+        return <details
+          className={`sidebar-nav-group ${groupIsActive ? "has-active" : ""}`}
+          key={heading}
+          onPointerEnter={(event) => { if (event.pointerType !== "touch") openNavigationGroup(event); }}
+          onPointerLeave={(event) => { if (event.pointerType !== "touch") closeNavigationGroup(event); }}
+        >
           <summary className="sidebar-nav-trigger"><span>{heading}</span></summary>
           <div className="sidebar-nav-items">{groupTabs.map(([key, label, icon]) => <button type="button" className={activeTab === key ? "active" : ""} key={key} aria-current={activeTab === key ? "page" : undefined} onClick={(event) => { setTab(key); setMenuOpen(false); event.currentTarget.closest("details")?.removeAttribute("open"); window.scrollTo({ top: 0 }); window.requestAnimationFrame(() => routeHeadingRef.current?.focus({ preventScroll: true })); }}><NavIcon name={icon} /><span>{label}</span>{activeTab === key && <span className="nav-active-dot" aria-hidden="true" />}</button>)}</div>
         </details>;
