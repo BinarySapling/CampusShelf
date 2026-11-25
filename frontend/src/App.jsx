@@ -17,7 +17,6 @@ const librarianTabs = [
   ["overview", "Overview", "overview"],
   ["books", "Catalogue", "books"],
   ["add_book", "Add a title", "add_book"],
-  ["reservations", "Book holds", "requests"],
   ["space_bookings", "Space & Pods", "bookings"],
   ["renewals", "Renewals", "loans"],
   ["reports", "Reports", "overview"],
@@ -36,7 +35,6 @@ const studentTabs = [
   ["space_bookings", "Room & Pods", "bookings"],
   ["my_loans", "My loans", "loans"],
   ["my_history", "History", "loans"],
-  ["my_holds", "My holds", "requests"],
   ["my_fines", "My fines", "fines"],
   ["account", "Account", "account"],
 ];
@@ -417,7 +415,7 @@ function AddBookPage({ setNotice, onSaved, onCancel, book = null }) {
         <label>Title<input name="title" required maxLength="120" defaultValue={book?.title || ""} /></label>
         <label>Author<input name="author" required maxLength="100" defaultValue={book?.author || ""} /></label>
         <div className="two-fields"><label>Category<input name="category" required maxLength="40" placeholder="Technology" defaultValue={book?.category || ""} /></label><label>ISBN<input name="isbn" maxLength="20" defaultValue={book?.isbn || ""} /></label></div>
-        <div className="two-fields"><label>Number of physical copies<input name="copies" type="number" min="0" max="200" defaultValue={book?.total ?? 1} required /><small>Copies currently borrowed or held for pickup cannot be removed.</small></label><label>Shelf<input name="shelf" maxLength="30" placeholder="A-01" defaultValue={book?.shelf || ""} /></label></div>
+        <div className="two-fields"><label>Number of physical copies<input name="copies" type="number" min="0" max="200" defaultValue={book?.total ?? 1} required /><small>Copies currently borrowed cannot be removed.</small></label><label>Shelf<input name="shelf" maxLength="30" placeholder="A-01" defaultValue={book?.shelf || ""} /></label></div>
         <label>Cover image URL (optional)<input name="cover_url" type="url" maxLength="1000" placeholder="https://example.com/book-cover.jpg" defaultValue={book?.cover_url || ""} /><small>Paste an HTTPS image URL. Leave blank to use the default illustrated cover.</small></label>
         <label>Description<textarea name="description" maxLength="300" rows="4" placeholder="A short note about this title" defaultValue={book?.description || ""} /></label>
         <button className="button primary" disabled={busy}>{busy ? "Saving book…" : book ? "Save book changes" : "Save book"}</button>
@@ -953,25 +951,6 @@ function IssueSlip({ loan, onClose }) {
     <div className="slip-qr"><QRCodeSVG value={loan.copy_id} size={150} /><b>{loan.copy_id}</b><span>Copy QR · issue slip</span></div>
     <div className="slip-actions"><button className="button light" onClick={() => window.print()}>Print issue slip</button>{onClose && <button className="text-button" onClick={onClose}>Close</button>}</div>
   </section>;
-}
-
-function ReservationsPage() {
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState("");
-  const load = useCallback(async () => {
-    setLoading(true);
-    setLoadError("");
-    try { setItems((await api("/reservations/")).results); }
-    catch (error) { setLoadError(error.message); }
-    finally { setLoading(false); }
-  }, []);
-  useEffect(() => { load(); }, [load]);
-  return <>
-    <PageTitle eyebrow="CIRCULATION / HOLDS" title="Book reservations" note="A copy returning to the shelf is assigned to the next student in line." action={<button className="button light" disabled={loading} onClick={load}>{loading ? "Refreshing…" : "Refresh queue"}</button>} />
-    {loadError && <LoadError message={loadError} onRetry={load} />}
-    <section className="panel"><div className="reservation-list" aria-busy={loading}>{items.map((item) => <article className="reservation-row" key={item.id}><div className="reservation-mark" aria-hidden="true">{item.status === "ready" ? "✓" : "↗"}</div><div className="reservation-info"><b>{item.book_title}</b><span>{item.author} · Shelf {item.shelf}</span><small>{item.student_name} · {item.student_id} · Placed {new Date(item.created_at).toLocaleDateString()}</small></div><span className={`status ${item.status}`}>{item.status === "ready" ? "Ready for pickup" : item.status}</span></article>)}{loading && <LoadingState label="Loading reservations…" />}{!loading && !loadError && items.length === 0 && <p className="empty" role="status">There are no book holds yet.</p>}</div></section>
-  </>;
 }
 
 function RenewalsPage({ setNotice }) {
@@ -1927,7 +1906,6 @@ function RenewalRequestControl({ loan, days, busy, retry = false, onDaysChange, 
 
 function StudentPortal({ user, tab, setTab, setNotice, selectedBook, onOpenBook, onBackToBooks, onBookRatingChange }) {
   const [loans, setLoans] = useState([]);
-  const [holds, setHolds] = useState([]);
   const [fines, setFines] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -1948,10 +1926,6 @@ function StudentPortal({ user, tab, setTab, setNotice, selectedBook, onOpenBook,
       if (tab === "my_loans") {
         const result = await api("/student/loans/");
         if (sequence === loadSequence.current) setLoans(result.results);
-      }
-      if (tab === "my_holds") {
-        const result = await api("/student/reservations/");
-        if (sequence === loadSequence.current) setHolds(result.results);
       }
       if (tab === "my_fines") {
         const result = await api("/fines/");
@@ -1988,29 +1962,6 @@ function StudentPortal({ user, tab, setTab, setNotice, selectedBook, onOpenBook,
       noticeText(setNotice, error.message, "error");
     } finally {
       setBusy(false);
-    }
-  }
-
-  async function reserveBook(bookId) {
-    setBusy(true);
-    try {
-      const result = await api("/student/reservations/", { method: "POST", body: formBody({ book_id: bookId }) });
-      noticeText(setNotice, `Reservation ${result.reservation.status === "ready" ? "ready for pickup" : "added to the queue"}.`);
-      setTab("my_holds");
-    } catch (error) {
-      noticeText(setNotice, error.message, "error");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function cancelHold(hold) {
-    try {
-      await api(`/student/reservations/${hold.id}/cancel/`, { method: "POST", body: formBody({}) });
-      await load();
-      noticeText(setNotice, "Reservation cancelled.");
-    } catch (error) {
-      noticeText(setNotice, error.message, "error");
     }
   }
 
@@ -2052,7 +2003,7 @@ function StudentPortal({ user, tab, setTab, setNotice, selectedBook, onOpenBook,
   if (tab === "student_book") return <>
     <PageTitle eyebrow="STUDENT CATALOGUE / TITLE DETAILS" title={selectedBook.title} note={`${selectedBook.author} · ${selectedBook.category}`} action={<button className="button light" onClick={onBackToBooks}>← Back to books</button>} />
     <section className="book-detail-hero"><div className="detail-cover-wrap"><BookCover book={selectedBook} /></div><div><span className="eyebrow">{selectedBook.category}</span><h3>{selectedBook.title}</h3><p>{selectedBook.description || "Find this title on the library shelves."}</p><BookRating rating={selectedBook.average_rating} count={selectedBook.rating_count} /><div className="detail-stats"><span><b>{selectedBook.available_to_borrow}</b> copies free to borrow</span><span><b>{selectedBook.total}</b> copies in the library</span><span>Shelf <b>{selectedBook.shelf || "Unassigned"}</b></span></div></div></section>
-    <section className="panel detail-next-step"><span className="eyebrow">{selectedBook.available_to_borrow > 0 ? "READY TO BORROW" : "RESERVATION QUEUE"}</span><h3>{selectedBook.available_to_borrow > 0 ? "Scan the QR on your chosen copy" : "Get in line for the next copy"}</h3><p>{selectedBook.available_to_borrow > 0 ? "Open the scanner to check out your chosen copy. The librarian scans the same copy QR when you return it." : "We’ll mark your hold ready as soon as a copy is available."}</p>{selectedBook.available_to_borrow > 0 ? <button className="button primary" onClick={() => { setTab("scan_copy"); window.scrollTo({ top: 0 }); }}>Go to scanner</button> : <button className="button primary" disabled={busy} onClick={() => reserveBook(selectedBook.id)}>{busy ? "Adding hold…" : "Reserve this book"}</button>}</section>
+    <section className="panel detail-next-step"><span className="eyebrow">{selectedBook.available_to_borrow > 0 ? "READY TO BORROW" : "CURRENTLY UNAVAILABLE"}</span><h3>{selectedBook.available_to_borrow > 0 ? "Scan the QR on your chosen copy" : "All copies are currently in use"}</h3><p>{selectedBook.available_to_borrow > 0 ? "Open the scanner to check out your chosen copy. The librarian scans the same copy QR when you return it." : "Please check the catalogue again after a copy is returned."}</p>{selectedBook.available_to_borrow > 0 && <button className="button primary" onClick={() => { setTab("scan_copy"); window.scrollTo({ top: 0 }); }}>Go to scanner</button>}</section>
     <StudentBookReviews key={selectedBook.id} book={selectedBook} setNotice={setNotice} onRatingChange={onBookRatingChange} />
   </>;
 
@@ -2067,12 +2018,6 @@ function StudentPortal({ user, tab, setTab, setNotice, selectedBook, onOpenBook,
       const renewalControl = <RenewalRequestControl loan={loan} days={days} busy={renewing} onDaysChange={(value) => setRenewalDays((current) => ({ ...current, [loan.id]: value }))} onRequest={requestRenewal} />;
       return <tr key={loan.id}><td><b>{loan.book_title}</b><small>{loan.book_author}</small></td><td><code>{loan.copy_id}</code></td><td><code>{loan.issue_code}</code></td><td>{new Date(loan.due_at).toLocaleDateString()}</td><td>{loan.current_fine === "0" ? "—" : `₹${loan.current_fine}`}</td><td><span className={`status ${loan.status}`}>{loan.status}</span></td><td>{loan.renewal_status === "pending" ? <span className="status pending">In review</span> : loan.renewal_status === "approved" ? <span className="status approved">Renewed</span> : loan.renewal_status === "rejected" ? <div className="renewal-rejected"><span className="status rejected">Declined</span>{loan.renewal_allowed && <RenewalRequestControl loan={loan} days={days} busy={renewing} retry onDaysChange={(value) => setRenewalDays((current) => ({ ...current, [loan.id]: value }))} onRequest={requestRenewal} />}</div> : loan.renewal_allowed ? renewalControl : "—"}</td><td><button className="button light small" onClick={() => openIssueSlip(loan)}>{loan.status === "borrowed" ? "Open return QR & slip" : "Open issue slip"}</button></td></tr>;
     })}</tbody></table>{loading && <LoadingState label="Loading your loans…" />}{!loading && !loadError && loans.length === 0 && <p className="empty" role="status">You do not have any loans yet.</p>}</div></section>
-  </>;
-
-  if (tab === "my_holds") return <>
-    <PageTitle eyebrow="STUDENT PORTAL / RESERVATIONS" title="My holds" note="Follow your place in line and see when a copy is ready for pickup." />
-    {loadError && <LoadError message={loadError} onRetry={load} />}
-    <section className="panel"><div className="reservation-list" aria-busy={loading}>{holds.map((hold) => <article className="reservation-row" key={hold.id}><div className="reservation-mark" aria-hidden="true">{hold.status === "ready" ? "✓" : "↗"}</div><div className="reservation-info"><b>{hold.book_title}</b><span>{hold.author} · Shelf {hold.shelf}</span><small>Placed {new Date(hold.created_at).toLocaleDateString()}{hold.status === "waiting" && hold.queue_position ? ` · Queue position ${hold.queue_position}` : ""}</small></div><span className={`status ${hold.status}`}>{hold.status === "ready" ? "Ready for pickup" : hold.status}</span>{["waiting", "ready"].includes(hold.status) && <button className="button light small" onClick={() => cancelHold(hold)}>Cancel hold</button>}</article>)}{loading && <LoadingState label="Loading your reservations…" />}{!loading && !loadError && holds.length === 0 && <p className="empty" role="status">No holds yet. Reserve a title from its details page when all copies are in use.</p>}</div></section>
   </>;
 
   return <>
@@ -2313,8 +2258,8 @@ export default function App() {
   const isStudent = user.role === "student";
   const tabs = isStudent ? studentTabs : librarianTabs;
   const navigationGroups = isStudent
-    ? [["DISCOVER", ["catalogue", "scan_copy", "space_bookings"]], ["MY READING", ["my_loans", "my_history", "my_holds", "my_fines"]], ["ACCOUNT", ["account"]]]
-    : [["LIBRARY", ["overview", "books", "add_book", "reservations", "space_bookings"]], ["CIRCULATION", ["loans", "renewals", "transactions", "fines"]], ["COMMUNITY", ["requests", "students", "reviews"]], ["MANAGEMENT", ["reports", "account"]]];
+    ? [["DISCOVER", ["catalogue", "scan_copy", "space_bookings"]], ["MY READING", ["my_loans", "my_history", "my_fines"]], ["ACCOUNT", ["account"]]]
+    : [["LIBRARY", ["overview", "books", "add_book", "space_bookings"]], ["CIRCULATION", ["loans", "renewals", "transactions", "fines"]], ["COMMUNITY", ["requests", "students", "reviews"]], ["MANAGEMENT", ["reports", "account"]]];
   function openNavigationGroup(event) {
     const group = event.currentTarget;
     clearNavigationClose(group);
@@ -2351,7 +2296,6 @@ export default function App() {
   else if (tab === "book_detail") content = <BooksPage onAddBook={() => setTab("add_book")} onOpenBook={(book) => { setSelectedBook(book); setTab("book_detail"); }} />;
   else if (tab === "requests") content = <RequestsPage setNotice={setNotice} />;
   else if (tab === "space_bookings") content = <LibrarianSpaceBookingsPage setNotice={setNotice} />;
-  else if (tab === "reservations") content = <ReservationsPage />;
   else if (tab === "renewals") content = <RenewalsPage setNotice={setNotice} />;
   else if (tab === "transactions") content = <TransactionsPage setNotice={setNotice} />;
   else if (tab === "reports") content = <ReportsPage />;

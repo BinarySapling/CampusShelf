@@ -34,7 +34,7 @@ from .forms import (
     StudentCheckoutForm,
     StudentRegistrationForm,
 )
-from .models import Book, BookCopy, BookReservation, Borrowing, FineEntry, Member, Review
+from .models import Book, BookCopy, Borrowing, FineEntry, Member, Review
 
 
 User = get_user_model()
@@ -115,32 +115,6 @@ def update_book_stock(book):
     book.total_copies = total_count
     book.available = available_count > 0
     book.save(update_fields=["copies", "total_copies", "available"])
-
-
-def promote_available_reservations(book):
-    available = BookCopy.objects.filter(book=book, status=BookCopy.AVAILABLE).count()
-    ready = BookReservation.objects.filter(book=book, status=BookReservation.READY).count()
-    waiting = BookReservation.objects.filter(book=book, status=BookReservation.WAITING).order_by("created_at")
-    for reservation in waiting[:max(0, available - ready)]:
-        BookReservation.objects.filter(pk=reservation.pk, status=BookReservation.WAITING).update(
-            status=BookReservation.READY,
-            updated_at=timezone.now(),
-        )
-
-
-def checkout_hold_error(member, copy_record):
-    if copy_record.status != BookCopy.AVAILABLE:
-        return "This copy is not available. Please choose another."
-    own_ready = BookReservation.objects.filter(
-        book=copy_record.book,
-        member=member,
-        status=BookReservation.READY,
-    ).exists()
-    if own_ready:
-        return None
-    available = BookCopy.objects.filter(book=copy_record.book, status=BookCopy.AVAILABLE).count()
-    reserved = BookReservation.objects.filter(book=copy_record.book, status=BookReservation.READY).count()
-    return "Available copies are held for students in the reservation queue." if available <= reserved else None
 
 
 def mark_overdue(record, now=None):
@@ -227,10 +201,6 @@ def create_borrowing(member, copy_record):
     if checkout_eligibility_error(member):
         return None
 
-    promote_available_reservations(book)
-    if checkout_hold_error(member, copy_record):
-        return None
-
     now = timezone.now()
     record_id = ObjectId()
     issue_code = issue_code_for(record_id)
@@ -280,16 +250,6 @@ def create_borrowing(member, copy_record):
         update_book_stock(book)
         return None
 
-    ready_hold = BookReservation.objects.filter(
-        book=book,
-        member=member,
-        status=BookReservation.READY,
-    ).order_by("created_at").first()
-    if ready_hold:
-        ready_hold.status = BookReservation.FULFILLED
-        ready_hold.updated_at = timezone.now()
-        ready_hold.save(update_fields=["status", "updated_at"])
-    promote_available_reservations(book)
     return borrowing
 
 
@@ -485,9 +445,6 @@ def delete_book(request, book_id):
     if Borrowing.objects.filter(book=book, status=Borrowing.BORROWED).exists():
         messages.error(request, "This book has an active borrowing and cannot be deleted until it is returned.")
         return redirect("books")
-    if BookReservation.objects.filter(book=book).exists():
-        messages.error(request, "This book has reservation history and cannot be deleted. Set its active copy count to zero instead.")
-        return redirect("books")
     BookCopy.objects.filter(book=book).delete()
     book.delete()
     messages.success(request, "Book deleted. Historical borrowing records are retained.")
@@ -664,8 +621,6 @@ def borrowings(request):
             messages.error(request, "Choose a valid registered student.")
         elif not copy_record or str(copy_record.book_id) != str(to_object_id(form.cleaned_data["book_id"])):
             messages.error(request, "That Copy ID is unavailable or does not match the selected title.")
-        elif checkout_hold_error(member, copy_record):
-            messages.error(request, "That available copy is reserved for a student in the hold queue.")
         elif eligibility_error:
             messages.error(request, eligibility_error)
         else:
@@ -791,10 +746,6 @@ def student_issue(request):
     eligibility_error = checkout_eligibility_error(member)
     if eligibility_error:
         messages.error(request, eligibility_error)
-        return redirect("student_portal")
-    hold_error = checkout_hold_error(member, copy_record)
-    if hold_error:
-        messages.error(request, hold_error)
         return redirect("student_portal")
 
     record = create_borrowing(member, copy_record)
@@ -964,7 +915,6 @@ def complete_return(record, returned_by=None, copy_record=None):
         book = Book.objects.filter(pk=record.book_id).first()
     if book:
         update_book_stock(book)
-        promote_available_reservations(book)
     return True
 
 

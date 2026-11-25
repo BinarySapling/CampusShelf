@@ -4,7 +4,7 @@ import { api } from "./api.js";
 import { ActiveFilters, CheckboxGroup } from "./Filters.jsx";
 
 const emptyFilters = { categories: [], availability: [], extras: [] };
-const availabilityOptions = [{ value: "available", label: "Available now" }, { value: "unavailable", label: "Join the hold queue" }];
+const availabilityOptions = [{ value: "available", label: "Available now" }, { value: "unavailable", label: "Currently unavailable" }];
 const extraOptions = [{ value: "rated", label: "Rated 4 stars & above" }, { value: "cover", label: "Has a cover image" }];
 
 export default function CatalogueExplorer({ path, renderBook, action }) {

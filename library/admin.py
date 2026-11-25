@@ -6,7 +6,6 @@ from django.utils import timezone
 from .models import (
     Book,
     BookCopy,
-    BookReservation,
     Borrowing,
     FineEntry,
     LibrarySpace,
@@ -96,13 +95,6 @@ class BorrowingAdmin(admin.ModelAdmin):
         if days <= 3:
             return "Due today" if days == 0 else f"Due in {days}d"
         return "On time"
-
-
-@admin.register(BookReservation)
-class BookReservationAdmin(admin.ModelAdmin):
-    list_display = ("book_title", "member", "status", "created_at", "updated_at")
-    search_fields = ("book_title", "member__name", "member__student_id")
-    list_filter = ("status",)
 
 
 @admin.register(LoanRenewalRequest)
