@@ -1410,3 +1410,12 @@ code {
     content: "";
   }
 }
+
+/* Keep the composer and header steady while the conversation grows. */
+.cs-chatbot-header, .cs-chatbot-suggestions { flex-shrink: 0; }
+.cs-chatbot-messages { min-height: 0; overscroll-behavior: contain; overflow-anchor: none; scrollbar-gutter: stable; }
+.cs-chatbot-input-bar input { min-width: 0; }
+.cs-chat-send-btn { width: 98px; gap: 6px; font-size: 12px; font-weight: 600; transition: background-color .15s; }
+.cs-chat-send-btn:hover:not(:disabled) { transform: none; }
+.cs-chat-send-btn[aria-busy="true"] { opacity: 1; background: #e6eeea; color: #35554e; cursor: wait; }
+.cs-thinking-status { min-height: 38px; color: #637477; font-size: 12px; }
