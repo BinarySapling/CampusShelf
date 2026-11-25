@@ -1419,3 +1419,17 @@ code {
 .cs-chat-send-btn:hover:not(:disabled) { transform: none; }
 .cs-chat-send-btn[aria-busy="true"] { opacity: 1; background: #e6eeea; color: #35554e; cursor: wait; }
 .cs-thinking-status { min-height: 38px; color: #637477; font-size: 12px; }
+
+/* Compact brand lockup for the portal navigation. */
+.sidebar .sidebar-brand { gap: 11px; align-items: center; }
+.sidebar .sidebar-brand-mark { width: 42px; height: 42px; padding: 0; border: 0; border-radius: 11px; background: transparent; box-shadow: none; }
+.sidebar .sidebar-brand-mark img { display: block; width: 42px; height: 42px; }
+.sidebar .sidebar-brand > div { min-width: 0; }
+.sidebar .sidebar-brand b { color: #173d39; font: 600 23px/1.15 "Inter", "Segoe UI", sans-serif; letter-spacing: -.8px; white-space: nowrap; }
+.sidebar .sidebar-brand small { margin-top: 5px; color: #596d64; font: 600 8px/1.4 "Inter", "Segoe UI", sans-serif; letter-spacing: 1.7px; white-space: nowrap; }
+@media (max-width: 520px) {
+  .sidebar .sidebar-brand { gap: 9px; }
+  .sidebar .sidebar-brand-mark, .sidebar .sidebar-brand-mark img { width: 35px; height: 35px; }
+  .sidebar .sidebar-brand b { font-size: 20px; }
+  .sidebar .sidebar-brand small { font-size: 7px; letter-spacing: 1.35px; }
+}

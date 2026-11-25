@@ -2309,7 +2309,7 @@ export default function App() {
     {menuOpen && <button className="nav-backdrop" type="button" aria-label="Close navigation" onClick={closeMobileMenu} />}
     <aside className="sidebar" id="portal-navigation" ref={sidebarRef} role={menuOpen ? "dialog" : undefined} aria-modal={menuOpen ? "true" : undefined} aria-label={menuOpen ? "Portal navigation" : undefined}>
       <button className="drawer-close" type="button" aria-label="Close navigation" ref={drawerCloseRef} onClick={closeMobileMenu}><X size={20} aria-hidden="true" /></button>
-      <div className="sidebar-brand"><span className="sidebar-brand-mark"><img src="/assets/campusshelf-logo.svg" alt="" /></span><div><b>CampusShelf</b><small>THE KNOWLEDGE CLUB</small></div></div>
+      <div className="sidebar-brand"><span className="sidebar-brand-mark"><img src="/assets/campusshelf-wordmark-icon.svg" alt="" /></span><div><b>CampusShelf</b><small>THE KNOWLEDGE CLUB</small></div></div>
       <div className="sidebar-portal-label"><span>{isStudent ? "READER PORTAL" : "LIBRARIAN DESK"}</span><i aria-hidden="true" /> <small>ONLINE</small></div>
       <nav className="sidebar-navigation" aria-label={isStudent ? "Student portal" : "Librarian workspace"}>{navigationGroups.map(([heading, keys]) => {
         const groupTabs = keys.map((key) => tabs.find(([tabKey]) => tabKey === key)).filter(Boolean);
