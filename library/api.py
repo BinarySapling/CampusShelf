@@ -20,7 +20,6 @@ from django.views.decorators.http import require_GET, require_POST
 
 from .forms import (
     BookForm,
-    BookReservationForm,
     CustomFineForm,
     FirstLibrarianForm,
     LibrarianForm,
@@ -36,7 +35,6 @@ from .forms import (
 from .models import (
     Book,
     BookCopy,
-    BookReservation,
     Borrowing,
     FineEntry,
     LibrarySpace,
@@ -57,10 +55,8 @@ from .views import (
     make_staff_id,
     overdue_fine,
     loan_due_details,
-    promote_available_reservations,
     to_object_id,
     update_book_stock,
-    checkout_hold_error,
 )
 
 
@@ -159,7 +155,7 @@ def book_ratings_for_books(books):
 def book_inventory_summaries(books):
     book_ids = [book.pk for book in books]
     if not book_ids:
-        return {}, {}
+        return {}
     copies = defaultdict(lambda: {"total": 0, "available": 0})
     for book_id, status in BookCopy.objects.filter(book_id__in=book_ids).exclude(
         status=BookCopy.RETIRED
@@ -167,15 +163,10 @@ def book_inventory_summaries(books):
         summary = copies[str(book_id)]
         summary["total"] += 1
         summary["available"] += status == BookCopy.AVAILABLE
-    ready_reservations = Counter(
-        str(book_id) for book_id in BookReservation.objects.filter(
-            book_id__in=book_ids, status=BookReservation.READY
-        ).values_list("book_id", flat=True)
-    )
-    return copies, ready_reservations
+    return copies
 
 
-def book_data(book, rating_summary=None, inventory=None, ready_reservations=None):
+def book_data(book, rating_summary=None, inventory=None):
     if inventory is None:
         copies = list(BookCopy.objects.filter(book=book).exclude(status=BookCopy.RETIRED))
         total = len(copies)
@@ -183,10 +174,6 @@ def book_data(book, rating_summary=None, inventory=None, ready_reservations=None
     else:
         total = inventory.get(str(book.pk), {}).get("total", 0)
         available = inventory.get(str(book.pk), {}).get("available", 0)
-    if ready_reservations is None:
-        reserved = BookReservation.objects.filter(book=book, status=BookReservation.READY).count()
-    else:
-        reserved = ready_reservations.get(str(book.pk), 0)
     rating_summary = rating_summary or {"average_rating": 0, "rating_count": 0}
     return {
         "id": str(book.pk),
@@ -198,7 +185,7 @@ def book_data(book, rating_summary=None, inventory=None, ready_reservations=None
         "description": book.description,
         "cover_url": book.cover_url,
         "available": available,
-        "available_to_borrow": max(0, available - reserved),
+        "available_to_borrow": available,
         "total": total,
         "average_rating": rating_summary["average_rating"],
         "rating_count": rating_summary["rating_count"],
@@ -208,9 +195,8 @@ def book_data(book, rating_summary=None, inventory=None, ready_reservations=None
 def borrowing_summaries(records):
     records = list(records)
     borrowing_ids = [record.pk for record in records]
-    book_ids = list({record.book_id for record in records if record.book_id})
     if not borrowing_ids:
-        return {"latest_renewal": {}, "renewed": set(), "hold_members": {}}
+        return {"latest_renewal": {}, "renewed": set()}
 
     latest_renewal = {}
     latest_created = {}
@@ -225,15 +211,7 @@ def borrowing_summaries(records):
         if status == LoanRenewalRequest.APPROVED:
             renewed.add(key)
 
-    hold_members = defaultdict(set)
-    if book_ids:
-        for book_id, member_id in BookReservation.objects.filter(
-            book_id__in=book_ids,
-            status__in=[BookReservation.WAITING, BookReservation.READY],
-        ).values_list("book_id", "member_id"):
-            hold_members[str(book_id)].add(str(member_id) if member_id else "")
-
-    return {"latest_renewal": latest_renewal, "renewed": renewed, "hold_members": hold_members}
+    return {"latest_renewal": latest_renewal, "renewed": renewed}
 
 
 def borrowing_data(record, summaries=None):
@@ -243,16 +221,10 @@ def borrowing_data(record, summaries=None):
         renewal = LoanRenewalRequest.objects.filter(borrowing=record).order_by("-created_at").first()
         renewal_status = renewal.status if renewal else ""
         renewed = LoanRenewalRequest.objects.filter(borrowing=record, status=LoanRenewalRequest.APPROVED).exists()
-        other_holds = record.book_id and BookReservation.objects.filter(
-            book_id=record.book_id,
-            status__in=[BookReservation.WAITING, BookReservation.READY],
-        ).exclude(member_id=record.member_id).exists()
     else:
         loan_key = str(record.pk)
         renewal_status = summaries["latest_renewal"].get(loan_key, "")
         renewed = loan_key in summaries["renewed"]
-        hold_members = summaries["hold_members"].get(str(record.book_id), set()) if record.book_id else set()
-        other_holds = any(member_id != str(record.member_id) for member_id in hold_members)
     return {
         "id": str(record.pk),
         "issue_code": record.issue_code,
@@ -272,7 +244,7 @@ def borrowing_data(record, summaries=None):
         "current_fine": str(amount),
         **due_details,
         "renewal_status": renewal_status,
-        "renewal_allowed": record.status == Borrowing.BORROWED and not renewed and not days and not other_holds and renewal_status != LoanRenewalRequest.PENDING,
+        "renewal_allowed": record.status == Borrowing.BORROWED and not renewed and not days and renewal_status != LoanRenewalRequest.PENDING,
     }
 
 
@@ -311,13 +283,13 @@ def paginated_books(request, queryset):
         start = (page_number - 1) * page_size
         books = list(queryset[start:start + page_size])
         ratings = book_ratings_for_books(books)
-        inventory, ready_reservations = book_inventory_summaries(books)
-        results = [book_data(book, ratings[str(book.pk)], inventory, ready_reservations) for book in books]
+        inventory = book_inventory_summaries(books)
+        results = [book_data(book, ratings[str(book.pk)], inventory) for book in books]
     else:
         books = list(queryset)
         ratings = book_ratings_for_books(books)
-        inventory, ready_reservations = book_inventory_summaries(books)
-        results = [book_data(book, ratings[str(book.pk)], inventory, ready_reservations) for book in books]
+        inventory = book_inventory_summaries(books)
+        results = [book_data(book, ratings[str(book.pk)], inventory) for book in books]
         if availability == {"available"}:
             results = [book for book in results if book["available_to_borrow"] > 0]
         elif availability == {"unavailable"}:
@@ -347,48 +319,6 @@ def fine_data(entry):
         "status": entry.status,
         "created_at": entry.created_at.isoformat(),
         "paid_at": entry.paid_at.isoformat() if entry.paid_at else "",
-    }
-
-
-def reservation_queue_positions(reservations):
-    book_ids = list({reservation.book_id for reservation in reservations if reservation.status == BookReservation.WAITING})
-    if not book_ids:
-        return {}
-    positions = {}
-    counts = defaultdict(int)
-    waiting = BookReservation.objects.filter(
-        book_id__in=book_ids, status=BookReservation.WAITING
-    ).order_by("book_id", "created_at", "pk").values_list("pk", "book_id")
-    for reservation_id, book_id in waiting:
-        book_key = str(book_id)
-        counts[book_key] += 1
-        positions[str(reservation_id)] = counts[book_key]
-    return positions
-
-
-def reservation_data(reservation, queue_positions=None):
-    if queue_positions is None:
-        queue_position = None
-        if reservation.status == BookReservation.WAITING:
-            queue_position = BookReservation.objects.filter(
-                book=reservation.book,
-                status=BookReservation.WAITING,
-                created_at__lte=reservation.created_at,
-            ).count()
-    else:
-        queue_position = queue_positions.get(str(reservation.pk))
-    return {
-        "id": str(reservation.pk),
-        "book_id": str(reservation.book_id),
-        "book_title": reservation.book_title,
-        "author": reservation.book.author,
-        "shelf": reservation.book.shelf or "Unassigned",
-        "student_id": reservation.member.student_id,
-        "student_name": reservation.member.name,
-        "status": reservation.status,
-        "queue_position": queue_position,
-        "created_at": reservation.created_at.isoformat(),
-        "updated_at": reservation.updated_at.isoformat(),
     }
 
 
@@ -793,13 +723,12 @@ def edit_book(request, book_id):
     loan_copy_pks = [row[0] for row in loan_copy_rows if row[0]]
     loan_copy_codes = [row[1] for row in loan_copy_rows if row[1]]
     available_copies = active_copies.filter(status=BookCopy.AVAILABLE).exclude(pk__in=loan_copy_pks).exclude(copy_id__in=loan_copy_codes)
-    ready_total = BookReservation.objects.filter(book=book, status=BookReservation.READY).count()
-    if desired_total < borrowed_total + ready_total:
-        return JsonResponse({"error": "Copies in use or held for pickup prevent reducing the physical stock to that number."}, status=409)
+    if desired_total < borrowed_total:
+        return JsonResponse({"error": "Copies in use prevent reducing the physical stock to that number."}, status=409)
     retire_count = max(0, active_total - desired_total)
-    retire_candidates = list(available_copies.order_by("-created_at")[:max(0, available_copies.count() - ready_total)])
+    retire_candidates = list(available_copies.order_by("-created_at")[:available_copies.count()])
     if len(retire_candidates) < retire_count:
-        return JsonResponse({"error": "Only copies that are available and not held can be removed from active stock."}, status=409)
+        return JsonResponse({"error": "Only copies that are available can be removed from active stock."}, status=409)
 
     values = form.save(commit=False)
     values.copies = 0
@@ -825,7 +754,6 @@ def edit_book(request, book_id):
                 shelf=values.shelf,
             )
     update_book_stock(book)
-    promote_available_reservations(book)
     return JsonResponse({"book": book_data(book)})
 
 
@@ -946,9 +874,6 @@ def loans_api(request):
     eligibility_error = checkout_eligibility_error(member)
     if eligibility_error:
         return JsonResponse({"error": eligibility_error}, status=409)
-    hold_error = checkout_hold_error(member, copy)
-    if hold_error:
-        return JsonResponse({"error": hold_error}, status=409)
     record = create_borrowing(member, copy)
     if not record:
         return JsonResponse({"error": "That copy is already on loan. Scan another copy."}, status=409)
@@ -971,9 +896,6 @@ def student_issue(request):
     ).first()
     if not copy:
         return JsonResponse({"error": "This copy is not available. Please choose another."}, status=409)
-    hold_error = checkout_hold_error(member, copy)
-    if hold_error:
-        return JsonResponse({"error": hold_error}, status=409)
     record = create_borrowing(member, copy)
     if not record:
         return JsonResponse({"error": "This copy was just checked out. Please try another."}, status=409)
@@ -1184,65 +1106,6 @@ def student_transactions_list(request):
 
 
 @student_api
-def student_reservations(request):
-    if request.method == "GET":
-        reservations = list(BookReservation.objects.filter(member=request.student_member))
-        queue_positions = reservation_queue_positions(reservations)
-        return JsonResponse({"results": [reservation_data(item, queue_positions) for item in reservations]})
-    if request.method != "POST":
-        return JsonResponse({"error": "Use GET or POST."}, status=405)
-    form = BookReservationForm(request.POST)
-    if not form.is_valid():
-        return JsonResponse({"errors": form_errors(form)}, status=400)
-    book_id = to_object_id(form.cleaned_data["book_id"])
-    book = Book.objects.filter(pk=book_id).first() if book_id else None
-    if not book:
-        return JsonResponse({"error": "Book not found."}, status=404)
-    existing = BookReservation.objects.filter(
-        book=book,
-        member=request.student_member,
-        status__in=[BookReservation.WAITING, BookReservation.READY],
-    ).first()
-    if existing:
-        return JsonResponse({"reservation": reservation_data(existing)})
-    promote_available_reservations(book)
-    available = BookCopy.objects.filter(book=book, status=BookCopy.AVAILABLE).count()
-    ready = BookReservation.objects.filter(book=book, status=BookReservation.READY).count()
-    if available > ready:
-        return JsonResponse({"error": "This title has copies available to borrow now."}, status=409)
-    item = BookReservation.objects.create(
-        book=book,
-        member=request.student_member,
-        book_title=book.title,
-    )
-    promote_available_reservations(book)
-    item.refresh_from_db()
-    return JsonResponse({"reservation": reservation_data(item)}, status=201)
-
-
-@student_api
-@require_POST
-def cancel_reservation(request, reservation_id):
-    object_id = to_object_id(reservation_id)
-    item = BookReservation.objects.filter(pk=object_id, member=request.student_member).first() if object_id else None
-    if not item or item.status not in (BookReservation.WAITING, BookReservation.READY):
-        return JsonResponse({"error": "That reservation is no longer active."}, status=404)
-    item.status = BookReservation.CANCELLED
-    item.updated_at = timezone.now()
-    item.save(update_fields=["status", "updated_at"])
-    promote_available_reservations(item.book)
-    return JsonResponse({"reservation": reservation_data(item)})
-
-
-@librarian_api
-@require_GET
-def reservations_list(request):
-    reservations = list(BookReservation.objects.select_related("book", "member"))
-    queue_positions = reservation_queue_positions(reservations)
-    return JsonResponse({"results": [reservation_data(item, queue_positions) for item in reservations]})
-
-
-@student_api
 @require_POST
 def request_loan_renewal(request):
     form = LoanRenewalRequestForm(request.POST)
@@ -1258,11 +1121,6 @@ def request_loan_renewal(request):
         return JsonResponse({"error": "This loan has already used its renewal."}, status=409)
     if LoanRenewalRequest.objects.filter(borrowing=loan, status=LoanRenewalRequest.PENDING).exists():
         return JsonResponse({"error": "A renewal request is already waiting for review."}, status=409)
-    if loan.book_id and BookReservation.objects.filter(
-        book_id=loan.book_id,
-        status__in=[BookReservation.WAITING, BookReservation.READY],
-    ).exclude(member=request.student_member).exists():
-        return JsonResponse({"error": "Another student is waiting for this title, so this loan cannot be renewed."}, status=409)
     item = LoanRenewalRequest.objects.create(
         borrowing=loan,
         member=request.student_member,
@@ -1294,11 +1152,6 @@ def review_renewal(request, renewal_id, action):
             return JsonResponse({"error": "This loan is returned or overdue and cannot be renewed."}, status=409)
         if LoanRenewalRequest.objects.filter(borrowing=loan, status=LoanRenewalRequest.APPROVED).exclude(pk=item.pk).exists():
             return JsonResponse({"error": "This loan has already used its renewal."}, status=409)
-        if loan.book_id and BookReservation.objects.filter(
-            book_id=loan.book_id,
-            status__in=[BookReservation.WAITING, BookReservation.READY],
-        ).exclude(member=item.member).exists():
-            return JsonResponse({"error": "Another student is waiting for this title."}, status=409)
         loan.due_at = loan.due_at + timedelta(days=item.days_requested)
         loan.save(update_fields=["due_at"])
         item.status = LoanRenewalRequest.APPROVED
@@ -1469,16 +1322,6 @@ def notifications_list(request):
                     f"{loan.book_title or 'Your book'} is due {label}.", "my_loans",
                     "urgent" if days_until_due == 0 else "info", loan.due_at,
                 )
-
-        ready_holds = BookReservation.objects.filter(
-            member=member, status=BookReservation.READY
-        ).select_related("book").order_by("-updated_at")[:12]
-        for item in ready_holds:
-            add_notice(
-                f"hold-ready:{item.pk}:{item.updated_at.isoformat()}", "Your hold is ready",
-                f"{item.book_title} is ready for pickup at {item.book.shelf or 'the library desk'}.",
-                "my_holds", "success", item.updated_at,
-            )
 
         recent_cutoff = now - timedelta(days=30)
         reviewed_renewals = LoanRenewalRequest.objects.filter(
