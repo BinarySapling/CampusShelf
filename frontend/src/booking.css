@@ -1,0 +1,36 @@
+/* Booking cards and slots must shrink with their available space. */
+.space-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 350px), 1fr)); align-items: start; }
+.space-card, .space-top, .schedule-section, .booking-tab-panel { min-width: 0; }
+.space-card { padding: clamp(16px, 2vw, 24px); }
+.space-title-row, .space-card-foot, .space-summary-pills, .schedule-legend { flex-wrap: wrap; }
+.space-title-row h3, .space-desc, .space-meta, .amenity-tag, .booking-card-details { overflow-wrap: anywhere; }
+.space-meta > span { min-width: 0; }
+.schedule-section { padding: 14px; background: #f7faf6; }
+.schedule-header { align-items: flex-start; gap: 12px; }
+.schedule-header b { font-size: 12px; line-height: 1.5; }
+.schedule-legend { gap: 8px 12px; color: #4b6153; font-size: 11px; }
+.slot-help { margin: 0 0 12px; color: #536758; font-size: 12px; line-height: 1.6; }
+.schedule-section .slot-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 100px), 1fr)); gap: 8px; }
+.schedule-section .slot-pill { min-width: 0; min-height: 66px; padding: 10px 6px; white-space: normal; text-align: center; font-family: var(--numbers, var(--sans)); font-size: 12px; line-height: 1.5; }
+.slot-time { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; font-variant-numeric: tabular-nums; }
+.schedule-section .slot-pill small { font-size: 11px; opacity: 1; overflow-wrap: anywhere; }
+.schedule-section button.slot-pill.empty:hover:not(:disabled) { transform: none; border-color: #437a54; box-shadow: 0 2px 8px #244f4d18; }
+.schedule-section button.slot-pill:focus-visible { outline: 3px solid #244f4d; outline-offset: 3px; }
+.schedule-section button.slot-pill:disabled { cursor: not-allowed; }
+.schedule-section button.slot-pill.empty:disabled { background: #edf0ec; border-color: #d3dbd1; color: #59665b; }
+.space-card-foot { align-items: center; gap: 12px; }
+.space-card-foot .button { min-height: 44px; }
+.space-filters .filter-item { flex-wrap: wrap; min-width: 0; }
+.space-filters input { max-width: 100%; min-width: 0; }
+.booking-modal { width: min(560px, 100%); max-height: calc(100dvh - 32px); }
+.booking-modal .two-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.booking-modal input, .booking-modal select, .booking-modal textarea { min-width: 0; max-width: 100%; }
+.booking-tab-panel .subnav-tabs { flex-wrap: wrap; }
+@media (max-width: 480px) {
+  .space-filters { align-items: stretch; gap: 12px; }
+  .space-filters .filter-group, .space-filters .filter-item { width: 100%; }
+  .space-filters input { flex: 1; }
+  .space-card-foot > .button { width: 100%; }
+  .booking-modal .two-fields { grid-template-columns: minmax(0, 1fr); }
+  .booking-modal { padding: 20px 16px; }
+}
