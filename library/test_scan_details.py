@@ -4,12 +4,27 @@ from unittest.mock import patch
 
 from bson import ObjectId
 from django.test import RequestFactory, SimpleTestCase
+from django.urls import Resolver404, resolve
 
-from library.api import scan_copy
+from library.api import book_data, scan_copy
 from library.models import BookCopy
 
 
 class ScanDetailsTests(SimpleTestCase):
+    def test_book_hold_endpoints_are_removed(self):
+        for path in ("/api/student/reservations/", "/api/student/reservations/old/cancel/", "/api/reservations/"):
+            with self.subTest(path=path), self.assertRaises(Resolver404):
+                resolve(path)
+
+    def test_catalogue_availability_uses_free_copies(self):
+        book = SimpleNamespace(
+            pk=ObjectId(), title="1984", author="George Orwell", category="Fiction",
+            isbn="", shelf="F-04", description="", cover_url="",
+        )
+        data = book_data(book, inventory={str(book.pk): {"total": 5, "available": 3}})
+        self.assertEqual(data["available_to_borrow"], 3)
+        self.assertEqual(data["total"], 5)
+
     def test_scan_includes_book_details_and_the_exact_copy(self):
         book = SimpleNamespace(
             pk=ObjectId(), title="1984", author="George Orwell",
@@ -26,12 +41,10 @@ class ScanDetailsTests(SimpleTestCase):
         # Keep this response test independent of the live MongoDB database.
         with patch("library.api.account_data", return_value={"role": "student"}), \
              patch("library.api.BookCopy.objects.filter") as copies, \
-             patch("library.api.Borrowing.objects.filter") as loans, \
-             patch("library.api.BookReservation.objects.filter") as reservations:
+             patch("library.api.Borrowing.objects.filter") as loans:
             copies.return_value.select_related.return_value.first.return_value = copy
             copies.return_value.exclude.return_value = [copy]
             loans.return_value.order_by.return_value.first.return_value = None
-            reservations.return_value.count.return_value = 0
 
             response = scan_copy(request, copy.copy_id)
 
