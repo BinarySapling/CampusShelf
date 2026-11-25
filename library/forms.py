@@ -149,10 +149,6 @@ class StudentIssueForm(forms.Form):
     copy_id = forms.CharField(max_length=28)
 
 
-class BookReservationForm(forms.Form):
-    book_id = forms.CharField(max_length=32)
-
-
 class LoanRenewalRequestForm(forms.Form):
     loan_id = forms.CharField(max_length=32)
     days_requested = forms.IntegerField(min_value=1, max_value=14, required=False, initial=14)
