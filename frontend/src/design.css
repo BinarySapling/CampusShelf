@@ -1,15 +1,3 @@
-/* Keep the pointer inside the menu while crossing the gap below its heading. */
-@media (min-width: 1101px) {
-  .sidebar .sidebar-nav-items::before,
-  .sidebar .sidebar-profile-popover::before {
-    position: absolute;
-    top: -12px;
-    right: 0;
-    left: 0;
-    height: 12px;
-    content: "";
-  }
-}
 
 /* CampusShelf — an editorial library workspace.
    Tokens and shared components cover every student and librarian route. */
@@ -1409,4 +1397,16 @@ code {
 @media (prefers-reduced-motion: reduce) {
   .dashboard-kpi, .dashboard-bar, .dashboard-donut-segment, .dashboard-month-column { transition-duration: 0s; }
   .dashboard-updated i.is-loading, .dashboard-refresh .is-spinning { animation: none; }
+}
+/* Keep the pointer inside the menu while crossing the gap below its heading. */
+@media (min-width: 1101px) {
+  .sidebar .sidebar-nav-items::before,
+  .sidebar .sidebar-profile-popover::before {
+    position: absolute;
+    top: -12px;
+    right: 0;
+    left: 0;
+    height: 12px;
+    content: "";
+  }
 }
