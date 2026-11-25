@@ -1235,3 +1235,16 @@ code {
   .sidebar .sidebar-profile-trigger { width: 38px; justify-content: center; padding: 0; }
   .sidebar .sidebar-profile-trigger::after, .sidebar .sidebar-profile-trigger .sidebar-online-dot { display: none; }
 }
+
+/* Keep the pointer inside the menu while crossing the gap below its heading. */
+@media (min-width: 1101px) {
+  .sidebar .sidebar-nav-items::before,
+  .sidebar .sidebar-profile-popover::before {
+    position: absolute;
+    top: -12px;
+    right: 0;
+    left: 0;
+    height: 12px;
+    content: "";
+  }
+}
