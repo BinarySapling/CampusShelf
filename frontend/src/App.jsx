@@ -1294,25 +1294,27 @@ function StudentSpaceBookingsPage({ user, setNotice }) {
                     <div className="schedule-header">
                       <b>Daily Timeline ({selectedDate})</b>
                       <div className="schedule-legend">
-                        <span><i className="legend-dot empty" /> Empty</span>
+                        <span><i className="legend-dot empty" aria-hidden="true" /> Available</span>
                         <span><i className="legend-dot pending" /> Review</span>
                         <span><i className="legend-dot occupied" /> Booked</span>
                       </div>
                     </div>
-                    <div className="slot-grid">
+                    <p className="slot-help">Choose an available time below to request a booking. Pending requests need librarian approval.</p>
+                    <div className="slot-grid" role="group" aria-label={`Time slots for ${space.name} on ${selectedDate}`}>
                       {(space.schedule || []).map((slot, idx) => (
                         <button
                           type="button"
                           disabled={slot.status !== "empty" || slot.bookable === false}
                           key={idx}
                           className={`slot-pill ${slot.status}`}
+                          aria-label={`${space.name}, ${selectedDate}, ${slot.start} to ${slot.end}: ${slot.status === "empty" && slot.bookable === false ? "Elapsed, unavailable" : slot.status === "empty" ? "Available, book this slot" : slot.status === "pending" ? "Pending approval, unavailable" : "Booked, unavailable"}`}
                           title={`${slot.start}-${slot.end}: ${slot.status === "empty" && slot.bookable === false ? "Elapsed slot" : slot.status === "empty" ? "Empty / Click to book" : slot.status === "pending" ? "Pending approval" : "Occupied"}`}
                           onClick={() => {
                             if (slot.status === "empty" && slot.bookable !== false) openBookingModal(space, slot);
                           }}
                         >
-                          <span>{slot.start}</span>
-                          <small>{slot.status === "empty" && slot.bookable === false ? "Elapsed" : slot.status === "empty" ? "Empty" : slot.status === "pending" ? "Pending" : "Booked"}</small>
+                          <span className="slot-time"><span>{slot.start}</span><span aria-hidden="true">–</span><span>{slot.end}</span></span>
+                          <small>{slot.status === "empty" && slot.bookable === false ? "Elapsed" : slot.status === "empty" ? "Available" : slot.status === "pending" ? "Pending" : "Booked"}</small>
                         </button>
                       ))}
                     </div>
@@ -1795,7 +1797,7 @@ function LibrarianSpaceBookingsPage({ setNotice }) {
                     <div className="schedule-header">
                       <b>Hourly Occupancy ({scheduleDate})</b>
                       <div className="schedule-legend">
-                        <span><i className="legend-dot empty" /> Empty</span>
+                        <span><i className="legend-dot empty" aria-hidden="true" /> Available</span>
                         <span><i className="legend-dot pending" /> Pending</span>
                         <span><i className="legend-dot occupied" /> Booked</span>
                       </div>
@@ -1803,8 +1805,8 @@ function LibrarianSpaceBookingsPage({ setNotice }) {
                     <div className="slot-grid">
                       {(sp.schedule || []).map((slot, idx) => (
                         <div key={idx} className={`slot-pill ${slot.status}`}>
-                          <span>{slot.start}</span>
-                          <small>{slot.status === "empty" ? "Empty" : slot.status === "pending" ? "Pending" : "Booked"}</small>
+                          <span className="slot-time"><span>{slot.start}</span><span aria-hidden="true">–</span><span>{slot.end}</span></span>
+                          <small>{slot.status === "empty" ? "Available" : slot.status === "pending" ? "Pending" : "Booked"}</small>
                         </div>
                       ))}
                     </div>
