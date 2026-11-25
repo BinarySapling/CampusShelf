@@ -13,7 +13,6 @@ from django.utils import timezone
 
 from library.models import (
     Book,
-    BookReservation,
     Borrowing,
     FineEntry,
     LibrarySpace,
@@ -172,8 +171,8 @@ def smart_local_response(query_text, student_member=None):
 
     # 4. Student's personal loans, bookings, or account status
     if student_member and (
-        ("my" in text and any(w in text for w in ["booking", "loan", "hold", "fine", "account", "record", "due", "status", "profile"]))
-        or any(k in text for k in ["my bookings", "my loans", "my holds", "my fines", "what did i book", "what did i borrow"])
+        ("my" in text and any(w in text for w in ["booking", "loan", "fine", "account", "record", "due", "status", "profile"]))
+        or any(k in text for k in ["my bookings", "my loans", "my fines", "what did i book", "what did i borrow"])
     ):
         my_bookings = SpaceBooking.objects.filter(member=student_member).order_by("-booking_date", "-start_time")[:4]
         my_loans = Borrowing.objects.filter(member=student_member, status=Borrowing.BORROWED)
@@ -350,7 +349,7 @@ YOUR CAPABILITIES & KNOWLEDGE:
 2. Library Catalogue & Recommendations:
    - You know all titles, authors, categories, shelf locations, and physical copy availability.
    - You can recommend books for study topics (e.g., Computer Science, Data Structures, AI, Networks, Machine Learning, Literature, Mathematics).
-   - If a student wants a book whose copies are in use, explain that they can place a hold under the "Discover" tab on the title's detail page.
+   - If every copy of a book is in use, ask the student to check the catalogue again after a copy is returned. Book holds are not supported.
 
 3. Library Procedures & Operations:
    - Account Access: Students can sign up directly without librarian approval, and can log in using either their Student ID (e.g. STU-...) OR their email address!
@@ -363,7 +362,6 @@ YOUR CAPABILITIES & KNOWLEDGE:
    - "Room & Pods": Explore spaces, check hourly timeline pills, book slots, view my reservations.
    - "Discover": Search catalogue, filter by category/shelf, read reviews, reserve copies.
    - "My loans": Current loans, due dates, renewal requests.
-   - "My holds": Book reservation queue.
    - "My fines": Overdue and fine receipts.
 
 {student_section}
