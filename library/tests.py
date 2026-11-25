@@ -1135,29 +1135,23 @@ class CampusShelfFeatureApiTests(TestCase):
         self.assertEqual(self.book.total_copies, 1)
         self.assertTrue(Borrowing.objects.filter(member=member, status=Borrowing.BORROWED).exists())
 
-    def test_reservation_queue_promotes_on_return_and_fulfills_on_checkout(self):
-        first_member, first_client = self.make_student("FIRST")
-        next_member, next_client = self.make_student("NEXT")
-        checkout = first_client.post("/api/student/issue/", {"copy_id": self.copy.copy_id})
-        self.assertEqual(checkout.status_code, 201)
-
-        reserved = next_client.post("/api/student/reservations/", {"book_id": str(self.book.id)})
-        self.assertEqual(reserved.status_code, 201)
-        self.assertEqual(reserved.json()["reservation"]["status"], BookReservation.WAITING)
-        self.assertEqual(self.staff_client.get("/api/reservations/").json()["results"][0]["student_id"], next_member.student_id)
-
-        returned = self.staff_client.post("/api/returns/copy/", {"copy_id": self.copy.copy_id})
-        self.assertEqual(returned.status_code, 200)
-        reservation = BookReservation.objects.get(member=next_member, book=self.book)
-        self.assertEqual(reservation.status, BookReservation.READY)
-        queue_block = first_client.post("/api/student/issue/", {"copy_id": self.copy.copy_id})
-        self.assertEqual(queue_block.status_code, 409)
-
-        pickup = next_client.post("/api/student/issue/", {"copy_id": self.copy.copy_id})
-        self.assertEqual(pickup.status_code, 201)
-        reservation.refresh_from_db()
-        self.assertEqual(reservation.status, BookReservation.FULFILLED)
-        self.assertEqual(Borrowing.objects.filter(status=Borrowing.BORROWED, copy_id=self.copy.copy_id).count(), 1)
+    def test_legacy_holds_do_not_block_availability_checkout_or_renewal(self):
+        member, client = self.make_student("BORROWER")
+        waiting_member, _ = self.make_student("WAITER")
+        BookReservation.objects.create(
+            book=self.book, member=waiting_member,
+            book_title=self.book.title, status=BookReservation.READY,
+        )
+        catalogue = client.get("/api/catalogue/").json()["results"]
+        book = next(item for item in catalogue if item["id"] == str(self.book.pk))
+        self.assertEqual(book["available_to_borrow"], book["available"])
+        issued = client.post("/api/student/issue/", {"copy_id": self.copy.copy_id})
+        self.assertEqual(issued.status_code, 201)
+        loan = Borrowing.objects.get(member=member, status=Borrowing.BORROWED)
+        renewal = client.post("/api/student/renewals/", {"loan_id": str(loan.pk), "days_requested": "7"})
+        self.assertEqual(renewal.status_code, 201)
+        self.assertEqual(client.post("/api/student/reservations/", {"book_id": str(self.book.pk)}).status_code, 404)
+        self.assertEqual(self.staff_client.get("/api/reservations/").status_code, 404)
 
     def test_renewals_need_librarian_decision_and_reports_include_transactions(self):
         member, student_client = self.make_student("RENEW")
