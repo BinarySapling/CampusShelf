@@ -10,6 +10,7 @@ from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.forms import PasswordChangeForm
 from django.contrib.auth import login as auth_login
 from django.contrib.auth import logout as auth_logout
+from django.db import connections
 from django.db.models import Count, Q, Sum
 from django.db.models.functions import Coalesce
 from django.http import JsonResponse
@@ -1579,19 +1580,60 @@ def dashboard_data(request):
     due_soon_end = timezone.make_aware(
         datetime.combine(today + timedelta(days=4), datetime.min.time()), timezone.get_current_timezone()
     )
-    books_summary = Book.objects.aggregate(book_count=Count("pk"), total_copies=Sum("total_copies"))
+    books_summary = Book.objects.aggregate(book_count=Count("pk"))
+    copy_summary = BookCopy.objects.aggregate(
+        total=Count("pk"),
+        available=Count("pk", filter=Q(status=BookCopy.AVAILABLE)),
+        borrowed=Count("pk", filter=Q(status=BookCopy.BORROWED)),
+        retired=Count("pk", filter=Q(status=BookCopy.RETIRED)),
+    )
     loan_summary = Borrowing.objects.filter(status=Borrowing.BORROWED).aggregate(
         active=Count("pk"),
         overdue=Count("pk", filter=Q(due_at__lt=day_start)),
         due_soon=Count("pk", filter=Q(due_at__gte=day_start, due_at__lt=due_soon_end)),
+        on_track=Count("pk", filter=Q(due_at__gte=due_soon_end)),
     )
+    priority_loans = Borrowing.objects.filter(
+        status=Borrowing.BORROWED,
+        due_at__lt=due_soon_end,
+    ).order_by("due_at").values(
+        "issue_code", "copy_id", "book_title", "member_name", "member_student_id", "due_at"
+    )[:6]
+    today_local = timezone.localdate()
+    attention = []
+    for loan in priority_loans:
+        due_date = timezone.localtime(loan["due_at"]).date()
+        days_late = max(0, (today_local - due_date).days)
+        attention.append({
+            "issue_code": loan["issue_code"],
+            "copy_id": loan["copy_id"],
+            "book_title": loan["book_title"],
+            "student_name": loan["member_name"],
+            "student_id": loan["member_student_id"],
+            "due_at": loan["due_at"].isoformat(),
+            "days_late": days_late,
+            "state": "overdue" if days_late else "due-soon",
+        })
+    inventory_total = copy_summary["total"] or 0
     return JsonResponse({
         "books": books_summary["book_count"],
-        "copies": books_summary["total_copies"] or 0,
+        "copies": inventory_total,
+        "inventory": {
+            "total": inventory_total,
+            "available": copy_summary["available"] or 0,
+            "on_loan": copy_summary["borrowed"] or 0,
+            "retired": copy_summary["retired"] or 0,
+        },
         "members": Member.objects.filter(approval_status=Member.APPROVED).count(),
         "active_loans": loan_summary["active"],
         "overdue_loans": loan_summary["overdue"],
         "due_soon_loans": loan_summary["due_soon"],
+        "loan_health": {
+            "overdue": loan_summary["overdue"],
+            "due_soon": loan_summary["due_soon"],
+            "on_track": loan_summary["on_track"],
+        },
+        "priority_loans": attention,
         "pending_requests": StudentSignupRequest.objects.filter(status=StudentSignupRequest.PENDING).count(),
         "unpaid_fines": FineEntry.objects.filter(status=FineEntry.UNPAID).count(),
     })
@@ -1621,9 +1663,13 @@ def reports_data(request):
         "issues": issue_counts[key],
         "returns": return_counts[key],
     } for key, year, month in month_keys]
-    popular = Borrowing.objects.exclude(book_title="").values("book_title").annotate(
-        borrowings=Count("pk")
-    ).order_by("-borrowings", "book_title")[:10]
+    popular = connections[Borrowing.objects.db].get_collection(Borrowing._meta.db_table).aggregate([
+        {"$match": {"book_title": {"$nin": [None, ""]}}},
+        {"$group": {"_id": "$book_title", "borrowings": {"$sum": 1}}},
+        {"$sort": {"borrowings": -1, "_id": 1}},
+        {"$limit": 10},
+        {"$project": {"_id": 0, "book_title": "$_id", "borrowings": 1}},
+    ])
     recent = Borrowing.objects.order_by("-borrowed_at").values(
         "issue_code", "book_title", "member_name", "member_student_id", "status", "borrowed_at", "due_at"
     )[:12]

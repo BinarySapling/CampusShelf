@@ -11,7 +11,7 @@ import { bookingEndTimes, bookingMinutes, bookingStartTimes, campusDateTime } fr
 import CatalogueExplorer from "./CatalogueExplorer.jsx";
 import { ActiveFilters, CheckboxGroup, RecordFilters, filterRows } from "./Filters.jsx";
 import { AnimatePresence, LazyMotion, domAnimation, m, useReducedMotion } from "motion/react";
-import { Bell, BookOpen, CalendarDays, ChartNoAxesCombined, Check, CheckCheck, CircleAlert, CircleUserRound, ClipboardList, Clock3, LayoutDashboard, LibraryBig, MapPin, Menu, Plus, Receipt, Repeat2, RotateCw, Sparkles, Star, Users, X } from "lucide-react";
+import { ArrowUpRight, Bell, BookOpen, CalendarDays, ChartNoAxesCombined, Check, CheckCheck, CircleAlert, CircleUserRound, ClipboardList, Clock3, LayoutDashboard, LibraryBig, MapPin, Menu, Plus, Receipt, Repeat2, RotateCw, Sparkles, Star, Users, X } from "lucide-react";
 
 const librarianTabs = [
   ["overview", "Overview", "overview"],
@@ -42,6 +42,19 @@ const studentTabs = [
 ];
 
 const noticeTimers = new WeakMap();
+const navigationCloseTimers = new WeakMap();
+function clearNavigationClose(menu) {
+  const timer = navigationCloseTimers.get(menu);
+  if (timer) window.clearTimeout(timer);
+  navigationCloseTimers.delete(menu);
+}
+function scheduleNavigationClose(menu) {
+  clearNavigationClose(menu);
+  navigationCloseTimers.set(menu, window.setTimeout(() => {
+    if (menu?.isConnected && !menu.matches(":hover") && !menu.contains(document.activeElement)) menu.open = false;
+    navigationCloseTimers.delete(menu);
+  }, 300));
+}
 function noticeText(setNotice, text, kind = "success") {
   window.clearTimeout(noticeTimers.get(setNotice));
   setNotice({ text, kind });
@@ -229,40 +242,127 @@ function AuthScreen({ onLogin, onSetup, onSignup, setupAvailable }) {
   );
 }
 
-function Dashboard({ setNotice, onNavigate }) {
+function DashboardDonut({ label, totalLabel, values, centerValue, onNavigate, loading }) {
+  const total = values.reduce((sum, item) => sum + (Number(item.value) || 0), 0);
+  const circumference = 2 * Math.PI * 58;
+  let offset = 0;
+  const segments = values.map((item) => {
+    const value = Math.max(0, Number(item.value) || 0);
+    const length = total ? circumference * value / total : 0;
+    const segment = { ...item, value, length, offset };
+    offset += length;
+    return segment;
+  });
+  return <section className="panel dashboard-chart-card">
+    <div className="panel-head"><div><span className="eyebrow">LIBRARY SNAPSHOT</span><h3>{label}</h3></div><span className="dashboard-chart-total">{total.toLocaleString()} {totalLabel}</span></div>
+    <div className="dashboard-donut-layout" aria-busy={loading}>
+      <div className="dashboard-donut-wrap">
+        <svg className="dashboard-donut-svg" viewBox="0 0 160 160" role="img" aria-label={`${label}: ${segments.map((item) => `${item.label} ${item.value}`).join(", ")}`}>
+          <circle cx="80" cy="80" r="58" fill="none" stroke="#edf0e9" strokeWidth="15" />
+          {segments.filter((item) => item.length > 0).map((item) => <circle key={item.key} className="dashboard-donut-segment" cx="80" cy="80" r="58" fill="none" stroke={item.color} strokeWidth="15" strokeDasharray={`${item.length} ${circumference - item.length}`} strokeDashoffset={-item.offset} transform="rotate(-90 80 80)" />)}
+        </svg>
+        <div className="dashboard-donut-center"><strong>{loading ? "…" : Number(centerValue ?? total).toLocaleString()}</strong><span>{totalLabel} in view</span></div>
+      </div>
+      <div className="dashboard-chart-legend">
+        {segments.map((item) => <button className="dashboard-legend-row" type="button" key={item.key} style={{ "--segment-color": item.color }} onClick={() => onNavigate(item.route)}>
+          <i className="dashboard-legend-dot" aria-hidden="true" />
+          <span className="dashboard-legend-copy"><b>{item.label}</b><small>{loading ? "—" : total ? `${Math.round(item.value / total * 100)}%` : "0%"}</small></span>
+          <strong>{loading ? "—" : item.value.toLocaleString()}</strong>
+        </button>)}
+      </div>
+    </div>
+  </section>;
+}
+
+function Dashboard({ user, onNavigate }) {
   const [stats, setStats] = useState(null);
+  const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+  const [reportError, setReportError] = useState("");
+  const [updatedAt, setUpdatedAt] = useState(null);
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError("");
-    try { setStats(await api("/dashboard/")); }
-    catch (error) { setLoadError(error.message); }
-    finally { setLoading(false); }
+    setReportError("");
+    const [dashboardResult, reportResult] = await Promise.allSettled([api("/dashboard/"), api("/reports/")]);
+    if (dashboardResult.status === "fulfilled") setStats(dashboardResult.value);
+    else setLoadError(dashboardResult.reason?.message || "The library overview could not load.");
+    if (reportResult.status === "fulfilled") setReport(reportResult.value);
+    else setReportError(reportResult.reason?.message || "Activity charts could not load.");
+    setUpdatedAt(new Date());
+    setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
-  return <>
+  const greeting = new Date().getHours() < 12 ? "Good morning" : new Date().getHours() < 17 ? "Good afternoon" : "Good evening";
+  const firstName = user?.name?.trim().split(/\s+/)[0] || "Librarian";
+  const inventory = stats?.inventory || {};
+  const loanHealth = stats?.loan_health || {};
+  const circulation = report?.circulation || [];
+  const maxMonth = Math.max(1, ...circulation.flatMap((item) => [item.issues, item.returns]));
+  const recent = (report?.recent_transactions || []).slice(0, 5);
+  const dueLabel = (item) => item.days_late > 0 ? `${item.days_late}d overdue` : `Due ${new Date(item.due_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`;
+  return <div className="dashboard-page">
     <section className="dashboard-hero">
       <div className="dashboard-hero-art" aria-hidden="true">
         <img className="dashboard-hero-background" src="/assets/library-dashboard-scene.jpg" alt="" fetchPriority="high" />
         <div className="dashboard-hero-inset"><img src="/assets/study-space-pod.jpg" alt="" /><span>THE STUDY NOOK · ROOM TO THINK</span></div>
       </div>
-      <div className="dashboard-hero-copy"><span className="eyebrow">THE LIBRARY DESK</span><h2>Make room for the next <em>great read.</em></h2><p>One place to care for the collection, keep circulation moving, and welcome new readers.</p><button className="button hero-action" onClick={() => onNavigate("loans")}>Open circulation <span aria-hidden="true">↗</span></button></div>
+      <div className="dashboard-hero-copy"><span className="eyebrow">THE LIBRARY DESK · {greeting.toUpperCase()}, {firstName.toUpperCase()}</span><h2>Make room for the next <em>great read.</em></h2><p>Keep the collection in balance, spot loans that need attention, and make every reader feel welcome.</p><div className="dashboard-hero-actions"><button className="button hero-action" onClick={() => onNavigate("loans")}>Open circulation <ArrowUpRight size={15} aria-hidden="true" /></button><button className="button dashboard-hero-secondary" onClick={() => onNavigate("add_book")}>Add a title <Plus size={14} aria-hidden="true" /></button></div></div>
     </section>
-    <div className="dashboard-intro"><div><span className="eyebrow">TODAY AT THE LIBRARY</span><h2>Here is what is happening.</h2></div><span className="dashboard-date">Your library, at a glance</span></div>
+    <div className="dashboard-heading"><div><span className="eyebrow">TODAY AT THE LIBRARY</span><h2>Good books, accounted for.</h2></div><div className="dashboard-heading-actions"><span className="dashboard-updated"><i className={loading ? "is-loading" : ""} />{updatedAt ? `Updated ${updatedAt.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}` : "Live library data"}</span><button className="button light small dashboard-refresh" type="button" onClick={load} disabled={loading}><RotateCw size={14} className={loading ? "is-spinning" : ""} aria-hidden="true" />Refresh</button></div></div>
     {loadError && <LoadError message={loadError} onRetry={load} />}
-    {loading && !stats && <LoadingState label="Loading library overview…" />}
-    <div className="stats-grid" aria-busy={loading}>
-      <StatCard label="Titles" value={loading ? "…" : stats?.books} note="In the catalogue" />
-      <StatCard label="Physical copies" value={loading ? "…" : stats?.copies} note="Each one has a QR label" />
-      <StatCard label="Students" value={loading ? "…" : stats?.members} note="Approved portal accounts" />
-      <StatCard label="Books on loan" value={loading ? "…" : stats?.active_loans} note="Across all students" />
-      <StatCard label="Late returns" value={loading ? "…" : stats?.overdue_loans} note="Fine starts the next day" />
-      <StatCard label="Due soon" value={loading ? "…" : stats?.due_soon_loans} note="Due within three days" />
-      <StatCard label="Requests to review" value={loading ? "…" : stats?.pending_requests} note="Approve before portal access" />
+    <div className="dashboard-kpi-grid" aria-busy={loading}>
+      {[
+        { label: "On loan", value: stats?.active_loans, note: "Copies currently with readers", route: "loans", icon: BookOpen, tone: "" },
+        { label: "Overdue", value: stats?.overdue_loans, note: "Need a return follow-up", route: "loans", icon: CircleAlert, tone: "coral" },
+        { label: "Due soon", value: stats?.due_soon_loans, note: "Due within the next 3 days", route: "loans", icon: Clock3, tone: "gold" },
+        { label: "Access requests", value: stats?.pending_requests, note: "Waiting for librarian review", route: "requests", icon: Users, tone: "blue" },
+      ].map(({ label, value, note, route, icon: Icon, tone }) => <button className={`dashboard-kpi ${tone}`} type="button" key={label} onClick={() => onNavigate(route)}>
+        <span className="dashboard-kpi-icon"><Icon size={18} strokeWidth={1.8} aria-hidden="true" /></span><span className="dashboard-kpi-label">{label}</span><strong>{loading && !stats ? "…" : Number(value || 0).toLocaleString()}</strong><small className="dashboard-kpi-note">{note}</small><ArrowUpRight className="dashboard-kpi-arrow" size={15} aria-hidden="true" />
+      </button>)}
     </div>
-    <div className="feature-note"><div className="feature-icon">₹</div><div><b>Overdue fines are calculated consistently</b><p>₹20 per calendar day after the due date, with a single charge recorded when a late book is returned.</p></div></div>
-  </>;
+    <div className="dashboard-fact-strip" aria-label="Library at a glance">
+      <button type="button" onClick={() => onNavigate("books")}><BookOpen size={17} aria-hidden="true" /><span><small>Catalogue titles</small><b>{stats ? Number(stats.books || 0).toLocaleString() : loading ? "…" : "0"}</b></span></button>
+      <button type="button" onClick={() => onNavigate("books")}><LibraryBig size={17} aria-hidden="true" /><span><small>Physical copies</small><b>{stats ? Number(stats.copies || 0).toLocaleString() : loading ? "…" : "0"}</b></span></button>
+      <button type="button" onClick={() => onNavigate("students")}><Users size={17} aria-hidden="true" /><span><small>Approved readers</small><b>{stats ? Number(stats.members || 0).toLocaleString() : loading ? "…" : "0"}</b></span></button>
+      <button type="button" onClick={() => onNavigate("fines")}><span className="dashboard-rupee" aria-hidden="true">₹</span><span><small>Unpaid fine entries</small><b>{stats ? Number(stats.unpaid_fines || 0).toLocaleString() : loading ? "…" : "0"}</b></span></button>
+    </div>
+    <div className="dashboard-chart-grid" aria-busy={loading}>
+      <DashboardDonut label="Copy availability" totalLabel="physical copies" centerValue={inventory.total} onNavigate={onNavigate} loading={loading && !stats} values={[
+        { key: "available", label: "On shelf", value: inventory.available, color: "#4e7b61", route: "books" },
+        { key: "borrowed", label: "With readers", value: inventory.on_loan, color: "#d4a355", route: "loans" },
+        { key: "retired", label: "Retired", value: inventory.retired, color: "#9ca9a0", route: "books" },
+      ]} />
+      <DashboardDonut label="Loan health" totalLabel="active loans" centerValue={stats?.active_loans} onNavigate={onNavigate} loading={loading && !stats} values={[
+        { key: "on-track", label: "On track", value: loanHealth.on_track, color: "#4e7b61", route: "loans" },
+        { key: "due-soon", label: "Due soon", value: loanHealth.due_soon, color: "#d4a355", route: "loans" },
+        { key: "overdue", label: "Overdue", value: loanHealth.overdue, color: "#bd624d", route: "loans" },
+      ]} />
+    </div>
+    <div className="dashboard-lower-grid">
+      <section className="panel dashboard-circulation-card">
+        <div className="panel-head"><div><span className="eyebrow">LAST SIX MONTHS</span><h3>Circulation rhythm</h3></div><button className="dashboard-panel-link" type="button" onClick={() => onNavigate("reports")}>Full reports <ArrowUpRight size={13} aria-hidden="true" /></button></div>
+        <div className="dashboard-chart-summary"><span><i className="chart-key" /> Checkouts <b>{Number(report?.totals?.borrowings || 0).toLocaleString()}</b></span><span><i className="chart-key return-key" /> Returns <b>{Number(report?.totals?.returned || 0).toLocaleString()}</b></span></div>
+        {reportError && <LoadError message={reportError} onRetry={load} />}
+        {circulation.length ? <div className="dashboard-bars" role="img" aria-label="Monthly checkouts and returns for the last six months"><div className="dashboard-bars-grid" aria-hidden="true"><i /><i /><i /></div><div className="dashboard-month-columns">{circulation.map((month) => <button className="dashboard-month-column" key={month.month} type="button" title={`${month.label}: ${month.issues} checkouts, ${month.returns} returns`} aria-label={`${month.label}: ${month.issues} checkouts and ${month.returns} returns. Open reports.`} onClick={() => onNavigate("reports")}><span className="dashboard-month-bars"><i className="dashboard-bar issue-bar" style={{ height: `${Math.max(month.issues ? 5 : 0, month.issues / maxMonth * 100)}%` }} /><i className="dashboard-bar return-bar" style={{ height: `${Math.max(month.returns ? 5 : 0, month.returns / maxMonth * 100)}%` }} /></span><small className="dashboard-month-label">{month.label.split(" ")[0]}</small></button>)}</div></div> : !loading && <div className="dashboard-chart-empty">Borrowing activity will appear here as books move through the library.</div>}
+      </section>
+      <section className="panel dashboard-attention-card">
+        <div className="panel-head"><div><span className="eyebrow">LIBRARIAN FOLLOW-UP</span><h3>Return desk priorities</h3></div><button className="dashboard-panel-link" type="button" onClick={() => onNavigate("loans")}>Issue register <ArrowUpRight size={13} aria-hidden="true" /></button></div>
+        <div className="dashboard-priority-list">{(stats?.priority_loans || []).map((item) => <button className={`dashboard-priority-row ${item.state}`} key={item.issue_code} type="button" onClick={() => onNavigate("loans")}><span className="dashboard-priority-icon">{item.state === "overdue" ? <CircleAlert size={15} aria-hidden="true" /> : <CalendarDays size={15} aria-hidden="true" />}</span><span className="dashboard-priority-copy"><b>{item.book_title || "Untitled book"}</b><small>{item.student_name || "Reader"} · {item.student_id || item.copy_id || item.issue_code}</small></span><span className="dashboard-due-label">{dueLabel(item)}</span></button>)}
+          {(!stats?.priority_loans?.length) && <div className="dashboard-empty"><span><Check size={17} aria-hidden="true" /></span><b>All clear at the return desk</b><small>No overdue books or returns due in the next three days.</small></div>}
+        </div>
+        <div className="dashboard-fine-note"><span>₹</span><p><b>Overdue policy:</b> ₹20 per calendar day after the due date. Fine is recorded when a late copy is received.</p></div>
+      </section>
+    </div>
+    <section className="panel dashboard-recent-card">
+      <div className="panel-head"><div><span className="eyebrow">LATEST MOVEMENT</span><h3>Recent circulation</h3></div><button className="dashboard-panel-link" type="button" onClick={() => onNavigate("transactions")}>Open activity <ArrowUpRight size={13} aria-hidden="true" /></button></div>
+      <div className="dashboard-recent-list">{recent.map((item) => { const returned = item.status === "returned"; return <button className="dashboard-recent-row" type="button" key={item.issue_code} onClick={() => onNavigate("transactions")}><span className={`dashboard-activity-icon ${returned ? "returned" : ""}`}>{returned ? <Check size={16} aria-hidden="true" /> : <BookOpen size={16} aria-hidden="true" />}</span><span className="dashboard-recent-copy"><b>{item.book_title || "Untitled book"}</b><small>{item.student_name || "Reader"} · {item.student_id || "Campus reader"}</small></span><span className={`dashboard-activity-status ${returned ? "returned" : ""}`}>{returned ? "Returned" : "Issued"}</span><time dateTime={item.borrowed_at}>{new Date(item.borrowed_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</time><ArrowUpRight className="dashboard-recent-arrow" size={14} aria-hidden="true" /></button>; })}
+        {loading && !report && <LoadingState label="Loading recent circulation…" />}
+        {!loading && recent.length === 0 && <div className="dashboard-chart-empty">Your recent checkouts and returns will appear here.</div>}
+      </div>
+    </section>
+  </div>;
 }
 
 function CatalogueTile({ book, onOpen }) {
@@ -2135,7 +2235,7 @@ export default function App() {
 
   useEffect(() => {
     if (menuOpen) return undefined;
-    const closeGroups = () => sidebarRef.current?.querySelectorAll(".sidebar-nav-group[open], .sidebar-profile-menu[open]").forEach((group) => { group.open = false; });
+    const closeGroups = () => sidebarRef.current?.querySelectorAll(".sidebar-nav-group[open], .sidebar-profile-menu[open]").forEach((group) => { clearNavigationClose(group); group.open = false; });
     const closeOnOutsideClick = (event) => {
       if (!sidebarRef.current?.contains(event.target)) closeGroups();
     };
@@ -2215,22 +2315,25 @@ export default function App() {
     : [["LIBRARY", ["overview", "books", "add_book", "reservations", "space_bookings"]], ["CIRCULATION", ["loans", "renewals", "transactions", "fines"]], ["COMMUNITY", ["requests", "students", "reviews"]], ["MANAGEMENT", ["reports", "account"]]];
   function openNavigationGroup(event) {
     const group = event.currentTarget;
+    clearNavigationClose(group);
     sidebarRef.current?.querySelectorAll(".sidebar-nav-group[open]").forEach((openGroup) => {
-      if (openGroup !== group) openGroup.open = false;
+      if (openGroup !== group) { clearNavigationClose(openGroup); openGroup.open = false; }
     });
     const profileMenu = sidebarRef.current?.querySelector(".sidebar-profile-menu[open]");
-    if (profileMenu) profileMenu.open = false;
+    if (profileMenu) { clearNavigationClose(profileMenu); profileMenu.open = false; }
     group.open = true;
   }
   function closeNavigationGroup(event) {
-    if (!event.currentTarget.contains(document.activeElement)) event.currentTarget.open = false;
+    if (!event.currentTarget.contains(event.relatedTarget) && !event.currentTarget.contains(document.activeElement)) scheduleNavigationClose(event.currentTarget);
   }
   function openProfileMenu(event) {
-    sidebarRef.current?.querySelectorAll(".sidebar-nav-group[open]").forEach((group) => { group.open = false; });
-    event.currentTarget.open = true;
+    const menu = event.currentTarget;
+    clearNavigationClose(menu);
+    sidebarRef.current?.querySelectorAll(".sidebar-nav-group[open]").forEach((group) => { clearNavigationClose(group); group.open = false; });
+    menu.open = true;
   }
   function closeProfileMenu(event) {
-    if (!event.currentTarget.contains(document.activeElement)) event.currentTarget.open = false;
+    if (!event.currentTarget.contains(event.relatedTarget) && !event.currentTarget.contains(document.activeElement)) scheduleNavigationClose(event.currentTarget);
   }
   const activeTab = tab === "book_detail" || tab === "edit_book" ? "books" : tab === "student_book" ? "catalogue" : tab;
   const active = tabs.find((item) => item[0] === activeTab) || tabs[0];
@@ -2238,7 +2341,7 @@ export default function App() {
   if (tab === "account") content = <AccountPage user={user} setNotice={setNotice} />;
   else if (isStudent && tab === "my_history") content = <TransactionsPage setNotice={setNotice} student />;
   else if (isStudent) content = <StudentPortal key={tab} user={user} tab={tab} setTab={setTab} setNotice={setNotice} selectedBook={selectedBook} onOpenBook={(book) => { setSelectedBook(book); setTab("student_book"); }} onBackToBooks={() => setTab("catalogue")} onBookRatingChange={handleBookRatingChange} />;
-  else if (tab === "overview") content = <Dashboard setNotice={setNotice} onNavigate={setTab} />;
+  else if (tab === "overview") content = <Dashboard user={user} onNavigate={setTab} />;
   else if (tab === "books") content = <BooksPage onAddBook={() => setTab("add_book")} onOpenBook={(book) => { setSelectedBook(book); setTab("book_detail"); }} />;
   else if (tab === "add_book") content = <AddBookPage setNotice={setNotice} onCancel={() => setTab("books")} onSaved={(book) => { setSelectedBook(book); setTab("book_detail"); }} />;
   else if (tab === "edit_book" && selectedBook) content = <AddBookPage key={`edit-${selectedBook.id}`} book={selectedBook} setNotice={setNotice} onCancel={() => setTab("book_detail")} onSaved={(book) => { setSelectedBook(book); setTab("book_detail"); }} />;
