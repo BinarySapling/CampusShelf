@@ -173,14 +173,16 @@ export default function Chatbot({ user }) {
     },
   ]);
 
-  const messagesEndRef = useRef(null);
+  const messagesRef = useRef(null);
+  const sendingRef = useRef(false);
   const inputRef = useRef(null);
   const launcherRef = useRef(null);
   const wasOpenRef = useRef(false);
 
   useEffect(() => {
-    if (isOpen && messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+    if (isOpen && messagesRef.current) {
+      // Scroll only the conversation, never the page behind the chat.
+      messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
     }
   }, [messages, isOpen, loading]);
 
@@ -211,7 +213,8 @@ export default function Chatbot({ user }) {
 
   async function handleSend(textToSend) {
     const text = (textToSend || input).trim();
-    if (!text || loading) return;
+    if (!text || sendingRef.current) return;
+    sendingRef.current = true;
 
     const userMessage = { role: "user", text };
     const updatedMessages = [...messages, userMessage];
@@ -238,6 +241,7 @@ export default function Chatbot({ user }) {
         },
       ]);
     } finally {
+      sendingRef.current = false;
       setLoading(false);
     }
   }
@@ -250,6 +254,7 @@ export default function Chatbot({ user }) {
   }
 
   function clearHistory() {
+    if (sendingRef.current) return;
     setMessages([
       {
         role: "model",
@@ -306,6 +311,7 @@ export default function Chatbot({ user }) {
                 className="cs-chat-icon-btn"
                 title="Clear chat history"
                 aria-label="Clear chat history"
+                disabled={loading}
                 onClick={clearHistory}
               >
                 <TrashIcon />
@@ -347,7 +353,7 @@ export default function Chatbot({ user }) {
           </div>
 
           {/* Message List */}
-          <div className="cs-chatbot-messages" role="log" aria-label="Conversation with the library assistant" aria-live="polite" aria-relevant="additions" aria-busy={loading}>
+          <div className="cs-chatbot-messages" ref={messagesRef} role="log" aria-label="Conversation with the library assistant" aria-live="polite" aria-relevant="additions" aria-busy={loading}>
             {messages.map((m, idx) => (
               <div
                 key={idx}
@@ -373,15 +379,11 @@ export default function Chatbot({ user }) {
                 <div className="cs-bot-avatar-mark">
                   <ChatLogoIcon size={14} />
                 </div>
-                <div className="cs-message-bubble bot-bubble typing">
-                  <span className="sr-only">The library assistant is responding.</span>
-                  <span className="typing-dot" />
-                  <span className="typing-dot" />
-                  <span className="typing-dot" />
+                <div className="cs-message-bubble bot-bubble cs-thinking-status" role="status">
+                  Thinking…
                 </div>
               </div>
             )}
-            <div ref={messagesEndRef} />
           </div>
 
           {/* Input & Send Bar */}
@@ -406,10 +408,11 @@ export default function Chatbot({ user }) {
               type="submit"
               className="cs-chat-send-btn"
               disabled={loading || !input.trim()}
-              title="Send message"
-              aria-label="Send message"
+              title={loading ? "Thinking…" : "Send message"}
+              aria-label={loading ? "Thinking, please wait" : "Send message"}
+              aria-busy={loading}
             >
-              <SendIcon />
+              {loading ? "Thinking…" : <><SendIcon /><span>Send</span></>}
             </button>
           </form>
         </section>
